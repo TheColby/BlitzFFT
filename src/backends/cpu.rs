@@ -1,102 +1,109 @@
-// src/backends/cpu.rs  (v2)
-//
-// Optimisations over v1
-// ─────────────────────
-//  1. Global plan cache (Mutex<HashMap<usize, Arc<dyn Fft<f32>>>>)
-//     Planning is amortised across calls.  The old code re-planned inside
-//     every par_iter closure, wasting ~50 µs per thread per call.
-//
-//  2. Pre-allocated scratch buffers per Rayon thread via thread_local!
-//     Eliminates Vec allocation inside the hot loop.
-//
-//  3. Window application fused into the copy-to-scratch step.
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
-use std::{collections::HashMap, sync::{Arc, Mutex}};
 use anyhow::Result;
-use num_complex::Complex;
+use num_complex::Complex32;
 use rayon::prelude::*;
-use rustfft::{Fft, FftPlanner};
+use realfft::{RealFftPlanner, RealToComplex};
 
 use super::{FftBackend, FftFrame};
 
-// ── Global plan cache ─────────────────────────────────────────────────────────
-// Keyed by fft_size; value is an Arc'd Fft object which is internally
-// thread-safe.
+type RealPlan = Arc<dyn RealToComplex<f32>>;
 
-type FftArc = Arc<dyn Fft<f32>>;
-
-static PLAN_CACHE: once_cell::sync::Lazy<Mutex<HashMap<usize, FftArc>>> =
+static PLAN_CACHE: once_cell::sync::Lazy<Mutex<HashMap<usize, RealPlan>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
 
-fn get_plan(fft_size: usize) -> FftArc {
+fn get_plan(fft_size: usize) -> RealPlan {
     let mut cache = PLAN_CACHE.lock().unwrap();
     if let Some(plan) = cache.get(&fft_size) {
         return Arc::clone(plan);
     }
-    let mut planner: FftPlanner<f32> = FftPlanner::new();
+
+    let mut planner = RealFftPlanner::<f32>::new();
     let plan = planner.plan_fft_forward(fft_size);
     cache.insert(fft_size, Arc::clone(&plan));
     plan
 }
 
-// ── Thread-local scratch buffer ───────────────────────────────────────────────
-
-thread_local! {
-    static SCRATCH: std::cell::RefCell<Vec<Complex<f32>>> =
-        std::cell::RefCell::new(Vec::new());
+struct WorkBuffers {
+    input: Vec<f32>,
+    spectrum: Vec<Complex32>,
+    scratch: Vec<Complex32>,
 }
 
-// ── Backend ───────────────────────────────────────────────────────────────────
+thread_local! {
+    static WORK: RefCell<Option<WorkBuffers>> = const { RefCell::new(None) };
+}
+
+fn with_work_buffers<R>(
+    plan: &RealPlan,
+    fft_size: usize,
+    f: impl FnOnce(&mut WorkBuffers) -> R,
+) -> R {
+    WORK.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let needs_resize = guard.as_ref().map_or(true, |work| {
+            work.input.len() != fft_size || work.spectrum.len() != plan.complex_len()
+        });
+
+        if needs_resize {
+            *guard = Some(WorkBuffers {
+                input: vec![0.0; fft_size],
+                spectrum: plan.make_output_vec(),
+                scratch: plan.make_scratch_vec(),
+            });
+        }
+
+        f(guard.as_mut().unwrap())
+    })
+}
 
 pub struct CpuFftBackend;
 
 impl CpuFftBackend {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl FftBackend for CpuFftBackend {
-    fn name(&self) -> &str { "RustFFT (CPU — plan-cached, Rayon parallel)" }
+    fn name(&self) -> &str {
+        "RealFFT (CPU - plan-cached, Rayon parallel)"
+    }
 
     fn compute_batch(&self, frames: &[&[f32]], fft_size: usize) -> Result<Vec<FftFrame>> {
-        // Fetch plan once (cheap — just an Arc clone after first call)
         let plan = get_plan(fft_size);
 
-        let results: Vec<FftFrame> = frames
+        frames
             .par_iter()
             .enumerate()
             .map(|(i, frame)| {
-                SCRATCH.with(|cell| {
-                    let mut buf = cell.borrow_mut();
-                    buf.resize(fft_size, Complex::new(0.0, 0.0));
-
+                with_work_buffers(&plan, fft_size, |work| {
                     let len = frame.len().min(fft_size);
-                    for (dst, &src) in buf[..len].iter_mut().zip(frame.iter()) {
-                        *dst = Complex::new(src, 0.0);
-                    }
-                    for dst in &mut buf[len..fft_size] {
-                        *dst = Complex::new(0.0, 0.0);
-                    }
+                    work.input[..len].copy_from_slice(&frame[..len]);
+                    work.input[len..].fill(0.0);
 
-                    // In-place FFT — no extra allocation
-                    plan.process(&mut buf);
+                    plan.process_with_scratch(
+                        &mut work.input,
+                        &mut work.spectrum,
+                        &mut work.scratch,
+                    )?;
 
-                    let half = fft_size / 2 + 1;
-                    let magnitude: Vec<f32> = buf[..half]
+                    let magnitude = work
+                        .spectrum
                         .iter()
                         .map(|c| (c.re * c.re + c.im * c.im).sqrt())
                         .collect();
 
-                    use num_complex::Complex32;
-                    let spectrum: Vec<Complex32> = buf
-                        .iter()
-                        .map(|c| Complex32::new(c.re, c.im))
-                        .collect();
-
-                    FftFrame { frame_index: i, spectrum, magnitude }
+                    Ok(FftFrame {
+                        frame_index: i,
+                        magnitude,
+                    })
                 })
             })
-            .collect();
-
-        Ok(results)
+            .collect()
     }
 }

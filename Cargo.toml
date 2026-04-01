@@ -21,6 +21,7 @@ benchmark = []                     # emit timing stats
 clap         = { version = "4",  features = ["derive"] }
 hound        = "3"                              # WAV I/O
 rustfft      = "6"                              # CPU fallback
+realfft      = "3.5"                            # exact real-input FFTs
 num-complex  = "0.4"
 bytemuck     = { version = "1", features = ["derive"] }
 anyhow       = "1"

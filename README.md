@@ -1,139 +1,135 @@
-# audiofft
+# BlitzFFT
 
-GPU-accelerated FFT CLI, optimized for audio files, with 128-bit internal processing. Because why not?
-**CUDA (cuFFT) > Metal (Apple GPU) > CPU (RustFFT)** — auto-selected at runtime.
+`BlitzFFT` is a Rust CLI for audio FFT work with two modes:
 
----
+- Framed/STFT-style analysis with auto-selected `CUDA -> Metal -> CPU`.
+- Exact whole-file FFT benchmarking on a single long waveform, including FFTW, KissFFT, PocketFFT, RustFFT, and the repo's optimized real-input path.
 
-## Why faster than FFTW?
+## What changed
 
-| Backend | Strategy | When it wins |
-|---|---|---|
-| **cuFFT** | Massively-parallel 1D R2C batched transforms on NVIDIA GPU | N ≥ 2048, batch ≥ 64 |
-| **Metal** | Stockham radix-2 FFT shader on Apple GPU (unified memory, zero-copy) | N ≥ 2048 on M-series |
-| **RustFFT** | Planner-cached SIMD Cooley-Tukey (FFTW-competitive) | Fallback on any CPU |
-
-For large audio files (hundreds of overlapping frames), GPU batching amortises transfer overhead and achieves **5–50× throughput** over single-threaded FFTW.
-
----
-
-## Prerequisites
-
-| Feature | Requirement |
-|---|---|
-| `cuda`  | CUDA 11+ runtime (`libcudart.so`, `libcufft.so`) — **no compile-time CUDA SDK needed** |
-| `metal` | macOS 12+ with Xcode command-line tools (`xcrun`) |
-| CPU     | Nothing extra — Rust stable toolchain only |
-
----
+- The CPU backend now uses `RealFFT` instead of packing real audio into a full complex `RustFFT` buffer for every frame.
+- Framed results no longer materialize an unused full complex spectrum for every frame.
+- There is now an exact whole-file benchmark path for non-power-of-two signals.
+- The repo includes a generated one-hour 32-bit float sine-wave test asset with a full-file Hann window:
+  `data/sine_440hz_60min_48khz_f32_hann.wav`
 
 ## Build
 
 ```bash
-# CPU fallback only (works everywhere)
+# CPU + exact whole-file benchmarks
 cargo build --release
 
-# NVIDIA GPU support
-cargo build --release --features cuda
-
-# Apple GPU support (macOS)
+# Apple GPU backend
 cargo build --release --features metal
 
-# Both (heterogeneous build)
+# NVIDIA GPU backend
+cargo build --release --features cuda
+
+# Everything enabled
 cargo build --release --features "cuda metal"
 ```
 
----
+Notes:
 
-## Usage
+- `FFTW3f` is linked from the local system install. On this machine it was discovered through `pkg-config`.
+- `KissFFT` and `PocketFFT` are vendored in `vendor/`.
+- The Metal shader is compiled by `build.rs` when the `metal` feature is enabled.
 
+## CLI
+
+The project name is `BlitzFFT`. The current binary name remains `audiofft`.
+
+```text
+Usage: audiofft [OPTIONS] [INPUT]
+
+Arguments:
+  [INPUT]  Input WAV file (16/24/32-bit PCM or f32)
+
+Options:
+  -n, --fft-size <FFT_SIZE>            FFT frame size (must be a power of two) [default: 2048]
+      --hop <HOP>                      Hop size in samples (default = fft_size/2)
+      --batch-size <BATCH_SIZE>        Number of frames to process per GPU batch (default = all frames) [default: 0]
+  -b, --backend <BACKEND>              Force a specific backend [default: auto]
+  -o, --output <PATH>                  Output file (optional; stdout if omitted for text/csv)
+  -f, --format <FORMAT>                Output format [default: text]
+      --top-bins <TOP_BINS>            Only emit the N loudest bins per frame (0 = all bins) [default: 0]
+      --benchmark                      Run framed benchmark comparing selected backend against CPU baseline
+      --bench-repeats <BENCH_REPEATS>  Number of benchmark repeats [default: 5]
+      --whole-file-benchmark           Run one exact FFT over the entire signal
+      --generate-sine <Hz,SR,Secs>     Synthesise a sine wave in memory
+      --write-generated-wav <PATH>     Persist the generated/loaded mono signal as 32-bit float WAV
+      --apply-full-hann                Apply a Hann window across the entire loaded/generated signal
+      --summary                        Print per-frame peak-frequency summary to stdout
 ```
-USAGE:
-    audiofft [OPTIONS] [INPUT]
 
-ARGS:
-    <INPUT>    WAV file (16/24/32-bit PCM or f32)
-
-OPTIONS:
-    -n, --fft-size <N>          FFT frame size, must be power of two [default: 2048]
-        --hop <SAMPLES>         Hop size in samples [default: fft_size/2]
-        --batch-size <N>        Frames per GPU batch (0 = all) [default: 0]
-    -b, --backend <BACKEND>     Force backend: auto|cuda|metal|cpu [default: auto]
-    -o, --output <PATH>         Output file (stdout if omitted for text/csv)
-    -f, --format <FORMAT>       text|csv|bin|none [default: text]
-        --top-bins <N>          Only emit N loudest bins per frame (0=all) [default: 0]
-        --benchmark             Compare GPU vs CPU and print speedup table
-        --bench-repeats <N>     Timing repetitions [default: 5]
-        --generate-sine <SPEC>  Synthesise input: "440,48000,2" = 440 Hz, 48 kHz, 2 s
-        --summary               Print peak frequency per frame to stdout
-    -h, --help
-    -V, --version
-```
-
-### Examples
+## Examples
 
 ```bash
-# Auto-select best GPU, write CSV spectrum
-audiofft recording.wav -f csv -o spectrum.csv
+# Standard framed analysis
+cargo run --release -- input.wav --backend cpu --summary -f none
 
-# Benchmark Metal vs CPU on 4096-pt FFT
-audiofft recording.wav -n 4096 --benchmark --backend metal
+# Whole-file exact FFT benchmark on an existing WAV
+cargo run --release -- input.wav --apply-full-hann --whole-file-benchmark --bench-repeats 1 -f none
 
-# Synthesise 440 Hz tone, force CUDA, print peak-freq summary
-audiofft --generate-sine 440,48000,2 --backend cuda --summary
-
-# Top-10 bins per frame as text to stdout
-audiofft recording.wav --top-bins 10
-
-# Large batch: 8192-pt FFT, 25% overlap
-audiofft recording.wav -n 8192 --hop 2048 -f bin -o spectrum.bin
+# Reproduce the hour-long benchmark asset and timings from this repo
+target/release/audiofft \
+  --generate-sine 440,48000,3600 \
+  --apply-full-hann \
+  --write-generated-wav data/sine_440hz_60min_48khz_f32_hann.wav \
+  --whole-file-benchmark \
+  --bench-repeats 1 \
+  -f none
 ```
 
----
+## Measured 60-Minute Whole-File FFT
 
-## Architecture
+Measured on `2026-04-01` in this repo after generating a mono 48 kHz 32-bit float WAV with:
 
-```
-audiofft/
+- Frequency: `440 Hz`
+- Duration: `3600 s`
+- Samples: `172,800,000`
+- Frequency resolution: `sample_rate / N = 48000 / 172800000 = 1 / 3600 Hz = 0.0002777778 Hz`
+- Window: full-signal Hann window applied before the FFT
+- Command: the reproduction command shown above
+
+The generated asset on disk is about `659 MiB`.
+
+The table below reports one exact forward FFT over the full signal. `Setup` includes planner/config creation. `Exec` is the measured transform run, excluding WAV load but including any algorithm-specific input marshaling from the real sample buffer.
+
+| Algorithm | Setup (s) | Exec (s) | Peak bin | Peak freq (Hz) |
+|---|---:|---:|---:|---:|
+| PocketFFT | 0.036 | 1.214 | 1,584,000 | 440.000000 |
+| RealFFT | 0.591 | 2.311 | 1,584,000 | 440.000000 |
+| BlitzFFT exact-real | 0.910 | 2.508 | 1,584,000 | 440.000000 |
+| FFTW3f | 0.206 | 4.096 | 1,584,000 | 440.000000 |
+| RustFFT complex | 1.015 | 4.379 | 1,584,000 | 440.000000 |
+| KissFFT | 0.758 | 5.240 | 1,584,000 | 440.000000 |
+
+## Layout
+
+```text
+BlitzFFT/
+├── data/
+│   └── sine_440hz_60min_48khz_f32_hann.wav
 ├── src/
-│   ├── main.rs           CLI (clap), dispatch, progress bar
-│   ├── audio.rs          WAV loading, Hann windowing, framing
-│   ├── benchmark.rs      Timing harness, speedup table
-│   ├── output.rs         text / CSV / binary writers
+│   ├── main.rs
+│   ├── audio.rs
+│   ├── benchmark.rs
+│   ├── output.rs
+│   ├── whole_fft.rs
+│   ├── native/
+│   │   └── pocketfft_bridge.cc
 │   └── backends/
-│       ├── mod.rs        FftBackend trait + runtime selection
-│       ├── cpu.rs        RustFFT (Rayon parallel, one planner/thread)
-│       ├── cuda.rs       cuFFT via runtime dlopen (no compile-time SDK)
-│       └── metal.rs      Stockham FFT + magnitude on Apple GPU
+│       ├── mod.rs
+│       ├── cpu.rs
+│       ├── cuda.rs
+│       └── metal.rs
+├── vendor/
+│   ├── kissfft/
+│   └── pocketfft/
 └── shaders/
-    └── fft.metal         Bit-reversal + radix-2 butterfly + magnitude kernels
+    └── fft.metal
 ```
-
-### CUDA backend details
-- Dynamically loads `libcudart` and `libcufft` at startup — binary runs on
-  any machine; CUDA unavailability is a soft failure.
-- Uses **batched cufftPlanMany R2C** — one plan covers all frames in the batch.
-- Pinned host memory (`cudaHostAlloc`) for maximum PCIe throughput.
-
-### Metal backend details
-- `build.rs` compiles `fft.metal` → `fft.metallib` via `xcrun metal`.
-- **Unified memory** on Apple Silicon: `MTLStorageModeShared` buffers are
-  zero-copy — no explicit host↔device transfers.
-- Three-kernel pipeline: `bit_reverse` → N × `fft_pass` → `magnitude`.
-- Fully batched: one command buffer covers all frames.
-
----
-
-## Output formats
-
-| Format | Description |
-|---|---|
-| `text` | `frame bin freq_hz magnitude` — human-readable, stdout |
-| `csv`  | Header + rows, importable by Python/MATLAB/Excel |
-| `bin`  | Raw little-endian `f32` array, `[frames × (N/2+1)]` magnitudes |
-| `none` | Suppress output (useful with `--benchmark` or `--summary`) |
-
----
 
 ## License
 

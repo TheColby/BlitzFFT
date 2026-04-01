@@ -1,13 +1,11 @@
 // src/backends/mod.rs
 use anyhow::Result;
-use num_complex::Complex32;
 
-/// One FFT hop: index, complex spectrum, magnitude spectrum.
+/// One FFT hop: index and positive-frequency magnitude spectrum.
 #[derive(Debug)]
 pub struct FftFrame {
-    pub frame_index : usize,
-    pub spectrum    : Vec<Complex32>,
-    pub magnitude   : Vec<f32>,     // only positive-frequency bins (N/2+1)
+    pub frame_index: usize,
+    pub magnitude: Vec<f32>, // only positive-frequency bins (N/2+1)
 }
 
 /// Common interface every backend must satisfy.
@@ -59,19 +57,15 @@ pub fn select_backend(force: Option<&str>) -> Arc<dyn FftBackend> {
 fn create_named(name: &str) -> Arc<dyn FftBackend> {
     match name.to_lowercase().as_str() {
         #[cfg(feature = "cuda")]
-        "cuda" => {
-            Arc::new(
-                cuda::CudaFftBackend::try_init()
-                    .expect("CUDA backend requested but initialisation failed"),
-            )
-        }
+        "cuda" => Arc::new(
+            cuda::CudaFftBackend::try_init()
+                .expect("CUDA backend requested but initialisation failed"),
+        ),
         #[cfg(feature = "metal")]
-        "metal" => {
-            Arc::new(
-                metal::MetalFftBackend::try_init()
-                    .expect("Metal backend requested but no Metal device found"),
-            )
-        }
+        "metal" => Arc::new(
+            metal::MetalFftBackend::try_init()
+                .expect("Metal backend requested but no Metal device found"),
+        ),
         "cpu" => Arc::new(cpu::CpuFftBackend::new()),
         other => {
             eprintln!("Unknown backend '{}', falling back to CPU", other);

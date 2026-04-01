@@ -5,12 +5,12 @@
 //   csv   — comma-separated, suitable for import into MATLAB / Python / Excel
 //   bin   — compact little-endian f32 binary (frame × bins)
 
+use anyhow::Result;
 use std::{
     fs::File,
     io::{BufWriter, Write},
     path::Path,
 };
-use anyhow::Result;
 
 use crate::{
     audio::{bin_to_hz, peak_bin},
@@ -27,26 +27,26 @@ pub enum OutputFormat {
 }
 
 pub fn write_frames(
-    frames      : &[FftFrame],
-    fft_size    : usize,
-    sample_rate : u32,
-    format      : OutputFormat,
-    out_path    : Option<&Path>,
-    top_bins    : usize,    // only emit the N loudest bins per frame (0 = all)
+    frames: &[FftFrame],
+    fft_size: usize,
+    sample_rate: u32,
+    format: OutputFormat,
+    out_path: Option<&Path>,
+    top_bins: usize, // only emit the N loudest bins per frame (0 = all)
 ) -> Result<()> {
     match format {
         OutputFormat::None => return Ok(()),
         OutputFormat::Text => {
             let mut w: Box<dyn Write> = match out_path {
                 Some(p) => Box::new(BufWriter::new(File::create(p)?)),
-                None    => Box::new(BufWriter::new(std::io::stdout())),
+                None => Box::new(BufWriter::new(std::io::stdout())),
             };
             write_text(&mut *w, frames, fft_size, sample_rate, top_bins)
         }
         OutputFormat::Csv => {
             let mut w: Box<dyn Write> = match out_path {
                 Some(p) => Box::new(BufWriter::new(File::create(p)?)),
-                None    => Box::new(BufWriter::new(std::io::stdout())),
+                None => Box::new(BufWriter::new(std::io::stdout())),
             };
             write_csv(&mut *w, frames, fft_size, sample_rate, top_bins)
         }
@@ -58,11 +58,11 @@ pub fn write_frames(
 }
 
 fn write_text(
-    w           : &mut dyn Write,
-    frames      : &[FftFrame],
-    fft_size    : usize,
-    sample_rate : u32,
-    top_bins    : usize,
+    w: &mut dyn Write,
+    frames: &[FftFrame],
+    fft_size: usize,
+    sample_rate: u32,
+    top_bins: usize,
 ) -> Result<()> {
     writeln!(w, "# audiofft — magnitude spectrum")?;
     writeln!(w, "# fft_size={} sample_rate={}", fft_size, sample_rate)?;
@@ -79,11 +79,11 @@ fn write_text(
 }
 
 fn write_csv(
-    w           : &mut dyn Write,
-    frames      : &[FftFrame],
-    fft_size    : usize,
-    sample_rate : u32,
-    top_bins    : usize,
+    w: &mut dyn Write,
+    frames: &[FftFrame],
+    fft_size: usize,
+    sample_rate: u32,
+    top_bins: usize,
 ) -> Result<()> {
     writeln!(w, "frame,bin,freq_hz,magnitude")?;
     for f in frames {
@@ -109,11 +109,7 @@ fn write_bin(path: &Path, frames: &[FftFrame]) -> Result<()> {
 /// Return (bin_index, magnitude) pairs; sorted by magnitude descending if
 /// top_bins > 0, otherwise all bins in order.
 fn emit_bins(magnitude: &[f32], top_bins: usize) -> Vec<(usize, f32)> {
-    let all: Vec<(usize, f32)> = magnitude
-        .iter()
-        .enumerate()
-        .map(|(i, &m)| (i, m))
-        .collect();
+    let all: Vec<(usize, f32)> = magnitude.iter().enumerate().map(|(i, &m)| (i, m)).collect();
 
     if top_bins == 0 || top_bins >= all.len() {
         all

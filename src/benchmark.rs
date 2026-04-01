@@ -4,26 +4,26 @@
 // Runs both the selected GPU backend and the CPU baseline, prints a
 // side-by-side comparison table, and reports the speedup ratio.
 
-use std::{sync::Arc, time::Instant};
 use anyhow::Result;
 use colored::Colorize;
+use std::{sync::Arc, time::Instant};
 
 use crate::backends::{cpu::CpuFftBackend, FftBackend, FftFrame};
 
 pub struct BenchResult {
-    pub backend_name : String,
-    pub frames       : usize,
-    pub fft_size     : usize,
-    pub elapsed_ms   : f64,
-    pub throughput_mfft : f64,   // millions of FFTs / second
+    pub backend_name: String,
+    pub frames: usize,
+    pub fft_size: usize,
+    pub elapsed_ms: f64,
+    pub throughput_mfft: f64, // millions of FFTs / second
 }
 
 /// Run `backend` and `cpu` on the same data; return (gpu_result, cpu_result).
 pub fn run(
-    backend  : &Arc<dyn FftBackend>,
-    frames   : &[Vec<f32>],
-    fft_size : usize,
-    repeats  : usize,
+    backend: &Arc<dyn FftBackend>,
+    frames: &[Vec<f32>],
+    fft_size: usize,
+    repeats: usize,
 ) -> Result<(BenchResult, BenchResult)> {
     let frame_refs: Vec<&[f32]> = frames.iter().map(|v| v.as_slice()).collect();
     let n = frames.len();
@@ -40,7 +40,7 @@ pub fn run(
 
     // ── CPU baseline ───────────────────────────────────────────────────────
     let cpu = CpuFftBackend::new();
-    let _ = cpu.compute_batch(&frame_refs, fft_size)?;  // warm-up
+    let _ = cpu.compute_batch(&frame_refs, fft_size)?; // warm-up
 
     let t1 = Instant::now();
     for _ in 0..repeats {
@@ -52,18 +52,18 @@ pub fn run(
 
     Ok((
         BenchResult {
-            backend_name    : backend.name().to_owned(),
-            frames          : n,
+            backend_name: backend.name().to_owned(),
+            frames: n,
             fft_size,
-            elapsed_ms      : gpu_ms,
-            throughput_mfft : mfft(gpu_ms),
+            elapsed_ms: gpu_ms,
+            throughput_mfft: mfft(gpu_ms),
         },
         BenchResult {
-            backend_name    : cpu.name().to_owned(),
-            frames          : n,
+            backend_name: cpu.name().to_owned(),
+            frames: n,
             fft_size,
-            elapsed_ms      : cpu_ms,
-            throughput_mfft : mfft(cpu_ms),
+            elapsed_ms: cpu_ms,
+            throughput_mfft: mfft(cpu_ms),
         },
     ))
 }
@@ -74,13 +74,22 @@ pub fn print_table(gpu: &BenchResult, cpu: &BenchResult) {
     let lose = if speedup >= 1.0 { cpu } else { gpu };
 
     println!();
-    println!("{}", "═══════════════════════════════════════════════════════".cyan());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════════".cyan()
+    );
     println!("{}", "  audiofft  —  Benchmark Results".cyan().bold());
-    println!("{}", "═══════════════════════════════════════════════════════".cyan());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════════".cyan()
+    );
     println!("  FFT size  : {} samples", gpu.fft_size);
     println!("  Batch     : {} frames", gpu.frames);
     println!();
-    println!("  {:<28} {:>10}  {:>14}", "Backend", "Time (ms)", "Throughput");
+    println!(
+        "  {:<28} {:>10}  {:>14}",
+        "Backend", "Time (ms)", "Throughput"
+    );
     println!("  {}", "─".repeat(56));
     println!(
         "  {:<28} {:>10.3}  {:>10.3} Mfft/s",
@@ -107,6 +116,9 @@ pub fn print_table(gpu: &BenchResult, cpu: &BenchResult) {
             lose.backend_name
         );
     }
-    println!("{}", "═══════════════════════════════════════════════════════".cyan());
+    println!(
+        "{}",
+        "═══════════════════════════════════════════════════════".cyan()
+    );
     println!();
 }

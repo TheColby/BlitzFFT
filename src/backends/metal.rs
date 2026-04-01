@@ -18,42 +18,37 @@
 
 #![cfg(feature = "metal")]
 
-use std::sync::Mutex;
-use anyhow::Result;
-use metal::{
-    Buffer, CommandQueue, ComputePipelineState, Device,
-    MTLResourceOptions, MTLSize,
-};
-use num_complex::Complex32;
-
 use super::{FftBackend, FftFrame};
+use anyhow::Result;
+use metal::{Buffer, CommandQueue, ComputePipelineState, Device, MTLResourceOptions, MTLSize};
+use std::sync::Mutex;
 
 const SHMEM_MAX_N: usize = 2048;
 
 // ── Persistent buffer pool ────────────────────────────────────────────────────
 
 struct Buffers {
-    real_in   : Buffer,   // f32   [batch × N]
-    window    : Buffer,   // f32   [N]
-    cplx_out  : Buffer,   // float2 [batch × N]
-    mag_out   : Buffer,   // f32   [batch × (N/2+1)]
-    params    : Buffer,   // u32   [6]
-    batch_cap : usize,
-    n_cap     : usize,
+    real_in: Buffer,  // f32   [batch × N]
+    window: Buffer,   // f32   [N]
+    cplx_out: Buffer, // float2 [batch × N]
+    mag_out: Buffer,  // f32   [batch × (N/2+1)]
+    params: Buffer,   // u32   [6]
+    batch_cap: usize,
+    n_cap: usize,
 }
 
 impl Buffers {
     fn new(device: &Device, batch: usize, n: usize) -> Self {
         let half1 = n / 2 + 1;
-        let opt   = MTLResourceOptions::StorageModeShared;
+        let opt = MTLResourceOptions::StorageModeShared;
         Self {
-            real_in  : device.new_buffer((batch * n     * 4) as u64, opt),
-            window   : device.new_buffer((n              * 4) as u64, opt),
-            cplx_out : device.new_buffer((batch * n     * 8) as u64, opt),
-            mag_out  : device.new_buffer((batch * half1 * 4) as u64, opt),
-            params   : device.new_buffer(24_u64, opt),
+            real_in: device.new_buffer((batch * n * 4) as u64, opt),
+            window: device.new_buffer((n * 4) as u64, opt),
+            cplx_out: device.new_buffer((batch * n * 8) as u64, opt),
+            mag_out: device.new_buffer((batch * half1 * 4) as u64, opt),
+            params: device.new_buffer(24_u64, opt),
             batch_cap: batch,
-            n_cap    : n,
+            n_cap: n,
         }
     }
     fn needs_resize(&self, batch: usize, n: usize) -> bool {
@@ -62,17 +57,17 @@ impl Buffers {
 }
 
 struct Pipelines {
-    shared      : ComputePipelineState,
-    pass_global : ComputePipelineState,
-    bit_rev     : ComputePipelineState,
-    magnitude   : ComputePipelineState,
+    shared: ComputePipelineState,
+    pass_global: ComputePipelineState,
+    bit_rev: ComputePipelineState,
+    magnitude: ComputePipelineState,
 }
 
 pub struct MetalFftBackend {
-    device : Device,
-    queue  : CommandQueue,
-    psos   : Pipelines,
-    bufs   : Mutex<Option<Buffers>>,
+    device: Device,
+    queue: CommandQueue,
+    psos: Pipelines,
+    bufs: Mutex<Option<Buffers>>,
 }
 
 unsafe impl Send for MetalFftBackend {}
@@ -80,9 +75,9 @@ unsafe impl Sync for MetalFftBackend {}
 
 impl MetalFftBackend {
     pub fn try_init() -> Option<Self> {
-        let device  = Device::system_default()?;
+        let device = Device::system_default()?;
         let lib_bytes = include_bytes!(env!("METAL_LIBRARY_PATH"));
-        let data    = metal::DispatchData::from(lib_bytes.as_ref());
+        let data = metal::DispatchData::from(lib_bytes.as_ref());
         let library = device.new_library_with_data(data).ok()?;
 
         let pso = |name: &str| -> Option<ComputePipelineState> {
@@ -91,21 +86,25 @@ impl MetalFftBackend {
         };
 
         Some(Self {
-            queue : device.new_command_queue(),
-            psos  : Pipelines {
-                shared      : pso("fft_shared")?,
-                pass_global : pso("fft_pass_global")?,
-                bit_rev     : pso("bit_reverse_global")?,
-                magnitude   : pso("magnitude_only")?,
+            queue: device.new_command_queue(),
+            psos: Pipelines {
+                shared: pso("fft_shared")?,
+                pass_global: pso("fft_pass_global")?,
+                bit_rev: pso("bit_reverse_global")?,
+                magnitude: pso("magnitude_only")?,
             },
-            bufs  : Mutex::new(None),
+            bufs: Mutex::new(None),
             device,
         })
     }
 
     fn tg(pso: &ComputePipelineState, desired: usize) -> MTLSize {
         let w = desired.min(pso.max_total_threads_per_threadgroup() as usize);
-        MTLSize { width: w as u64, height: 1, depth: 1 }
+        MTLSize {
+            width: w as u64,
+            height: 1,
+            depth: 1,
+        }
     }
 
     fn write_params(buf: &Buffer, stage: u32, n: u32, batch: u32, use_win: u32) {
@@ -113,7 +112,7 @@ impl MetalFftBackend {
         let half1 = n / 2 + 1;
         let p = buf.contents() as *mut u32;
         unsafe {
-            *p       = stage;
+            *p = stage;
             *p.add(1) = n;
             *p.add(2) = batch;
             *p.add(3) = use_win;
@@ -124,10 +123,12 @@ impl MetalFftBackend {
 }
 
 impl FftBackend for MetalFftBackend {
-    fn name(&self) -> &str { "Metal GPU — shared-memory FFT (v2)" }
+    fn name(&self) -> &str {
+        "Metal GPU — shared-memory FFT (v2)"
+    }
 
     fn compute_batch(&self, frames: &[&[f32]], fft_size: usize) -> Result<Vec<FftFrame>> {
-        let n     = fft_size;
+        let n = fft_size;
         let batch = frames.len();
         let half1 = n / 2 + 1;
 
@@ -143,7 +144,7 @@ impl FftBackend for MetalFftBackend {
             let ptr = bufs.real_in.contents() as *mut f32;
             for (i, frame) in frames.iter().enumerate() {
                 let base = i * n;
-                let len  = frame.len().min(n);
+                let len = frame.len().min(n);
                 unsafe {
                     std::ptr::copy_nonoverlapping(frame.as_ptr(), ptr.add(base), len);
                     if len < n {
@@ -175,18 +176,25 @@ impl FftBackend for MetalFftBackend {
 
             let enc = cmd.new_compute_command_encoder();
             enc.set_compute_pipeline_state(&self.psos.shared);
-            enc.set_buffer(0, Some(&bufs.real_in),  0);
-            enc.set_buffer(1, Some(&bufs.window),   0);
+            enc.set_buffer(0, Some(&bufs.real_in), 0);
+            enc.set_buffer(1, Some(&bufs.window), 0);
             enc.set_buffer(2, Some(&bufs.cplx_out), 0);
-            enc.set_buffer(3, Some(&bufs.mag_out),  0);
-            enc.set_buffer(4, Some(&bufs.params),   0);
+            enc.set_buffer(3, Some(&bufs.mag_out), 0);
+            enc.set_buffer(4, Some(&bufs.params), 0);
             enc.set_threadgroup_memory_length(0, (n * 8) as u64);
             enc.dispatch_thread_groups(
-                MTLSize { width: batch as u64, height: 1, depth: 1 },
-                MTLSize { width: (n / 2) as u64, height: 1, depth: 1 },
+                MTLSize {
+                    width: batch as u64,
+                    height: 1,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: (n / 2) as u64,
+                    height: 1,
+                    depth: 1,
+                },
             );
             enc.end_encoding();
-
         } else {
             // ── MULTI-PASS PATH: N > 2048 (e.g. 4096, 8192) ──────────────
             let log2n = (n as f64).log2() as u32;
@@ -197,9 +205,13 @@ impl FftBackend for MetalFftBackend {
                 let enc = cmd.new_compute_command_encoder();
                 enc.set_compute_pipeline_state(&self.psos.bit_rev);
                 enc.set_buffer(0, Some(&bufs.cplx_out), 0);
-                enc.set_buffer(1, Some(&bufs.params),   0);
+                enc.set_buffer(1, Some(&bufs.params), 0);
                 enc.dispatch_threads(
-                    MTLSize { width: n as u64, height: batch as u64, depth: 1 },
+                    MTLSize {
+                        width: n as u64,
+                        height: batch as u64,
+                        depth: 1,
+                    },
                     Self::tg(&self.psos.bit_rev, 512),
                 );
                 enc.end_encoding();
@@ -212,10 +224,14 @@ impl FftBackend for MetalFftBackend {
                 let enc = cmd.new_compute_command_encoder();
                 enc.set_compute_pipeline_state(&self.psos.pass_global);
                 enc.set_buffer(0, Some(&bufs.cplx_out), 0);
-                enc.set_buffer(1, Some(&bufs.window),   0);
-                enc.set_buffer(2, Some(&bufs.params),   0);
+                enc.set_buffer(1, Some(&bufs.window), 0);
+                enc.set_buffer(2, Some(&bufs.params), 0);
                 enc.dispatch_threads(
-                    MTLSize { width: (n / 2) as u64, height: batch as u64, depth: 1 },
+                    MTLSize {
+                        width: (n / 2) as u64,
+                        height: batch as u64,
+                        depth: 1,
+                    },
                     Self::tg(&self.psos.pass_global, 512),
                 );
                 enc.end_encoding();
@@ -227,10 +243,14 @@ impl FftBackend for MetalFftBackend {
                 let enc = cmd.new_compute_command_encoder();
                 enc.set_compute_pipeline_state(&self.psos.magnitude);
                 enc.set_buffer(0, Some(&bufs.cplx_out), 0);
-                enc.set_buffer(1, Some(&bufs.mag_out),  0);
-                enc.set_buffer(2, Some(&bufs.params),   0);
+                enc.set_buffer(1, Some(&bufs.mag_out), 0);
+                enc.set_buffer(2, Some(&bufs.params), 0);
                 enc.dispatch_threads(
-                    MTLSize { width: half1 as u64, height: batch as u64, depth: 1 },
+                    MTLSize {
+                        width: half1 as u64,
+                        height: batch as u64,
+                        depth: 1,
+                    },
                     Self::tg(&self.psos.magnitude, 512),
                 );
                 enc.end_encoding();
@@ -242,20 +262,17 @@ impl FftBackend for MetalFftBackend {
 
         // ── Read back (zero-copy on Apple Silicon) ────────────────────────
         let cplx_ptr = bufs.cplx_out.contents() as *const [f32; 2];
-        let mag_ptr  = bufs.mag_out.contents()  as *const f32;
+        let mag_ptr = bufs.mag_out.contents() as *const f32;
 
         let out = (0..batch)
             .map(|i| {
-                let spectrum: Vec<Complex32> = (0..n)
-                    .map(|k| unsafe {
-                        let c = *cplx_ptr.add(i * n + k);
-                        Complex32::new(c[0], c[1])
-                    })
-                    .collect();
                 let magnitude: Vec<f32> = (0..half1)
                     .map(|k| unsafe { *mag_ptr.add(i * half1 + k) })
                     .collect();
-                FftFrame { frame_index: i, spectrum, magnitude }
+                FftFrame {
+                    frame_index: i,
+                    magnitude,
+                }
             })
             .collect();
 

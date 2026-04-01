@@ -2,7 +2,7 @@
 //
 // audiofft — GPU-accelerated FFT CLI
 //
-// Priority: CUDA (cuFFT) → Metal → CPU (RustFFT)
+// Priority: CUDA (cuFFT) → Metal → CPU (RealFFT)
 //
 // Usage examples
 // ──────────────
@@ -10,27 +10,26 @@
 //   audiofft input.wav --backend metal        # force Metal
 //   audiofft input.wav --fft-size 4096 --hop 1024 --output spec.csv --format csv
 //   audiofft input.wav --benchmark            # compare GPU vs CPU
-//   audiofft --generate-sine 440 48000 2 | audiofft /dev/stdin --format text
+//   audiofft --generate-sine 440,48000,2 --summary -f none
 
 mod audio;
 mod backends;
 mod benchmark;
 mod output;
+mod whole_fft;
 
-use std::{
-    path::PathBuf,
-    sync::Arc,
-    time::Instant,
-};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use audio::{frame_signal, hann_window, load_wav};
+use rayon::prelude::*;
+
+use audio::{apply_hann_window_in_place, frame_signal, hann_window, load_wav, write_wav_f32};
 use backends::select_backend;
-use output::{write_frames, OutputFormat, print_summary};
+use output::{print_summary, write_frames, OutputFormat};
 
 // ── CLI definition ────────────────────────────────────────────────────────────
 
@@ -44,10 +43,10 @@ enum BackendChoice {
 
 #[derive(Parser, Debug)]
 #[command(
-    name    = "audiofft",
+    name = "audiofft",
     version = "0.1.0",
-    author  = "Colby Leider <colby@leider.org>",
-    about   = "GPU-accelerated FFT for audio — CUDA (cuFFT) and Metal backends"
+    author = "Colby Leider <colby@leider.org>",
+    about = "GPU-accelerated FFT for audio — CUDA (cuFFT) and Metal backends"
 )]
 struct Args {
     /// Input WAV file (16/24/32-bit PCM or f32)
@@ -90,10 +89,22 @@ struct Args {
     #[arg(long, default_value = "5")]
     bench_repeats: usize,
 
+    /// Run an exact single FFT over the entire signal instead of framing/STFT
+    #[arg(long)]
+    whole_file_benchmark: bool,
+
     /// Synthesise a pure sine tone and pipe it as the input (no WAV file needed)
     /// Format: <frequency_hz>,<sample_rate>,<duration_secs>  e.g. 440,48000,2
     #[arg(long, value_name = "Hz,SR,Secs")]
     generate_sine: Option<String>,
+
+    /// Persist generated sine audio as a 32-bit float WAV file
+    #[arg(long, value_name = "PATH")]
+    write_generated_wav: Option<PathBuf>,
+
+    /// Apply a Hann window across the entire loaded/generated signal
+    #[arg(long)]
+    apply_full_hann: bool,
 
     /// Print per-frame peak-frequency summary to stdout
     #[arg(long)]
@@ -102,15 +113,18 @@ struct Args {
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-fn is_power_of_two(n: usize) -> bool { n > 0 && (n & (n - 1)) == 0 }
+fn is_power_of_two(n: usize) -> bool {
+    n > 0 && (n & (n - 1)) == 0
+}
 
 /// Generate a mono sine tone as Vec<f32>.
 fn synthesise_sine(freq: f32, sample_rate: u32, duration_secs: f32) -> (Vec<f32>, u32) {
     use std::f32::consts::TAU;
     let n = (sample_rate as f32 * duration_secs) as usize;
-    let samples: Vec<f32> = (0..n)
-        .map(|i| (TAU * freq * i as f32 / sample_rate as f32).sin())
-        .collect();
+    let mut samples = vec![0.0f32; n];
+    samples.par_iter_mut().enumerate().for_each(|(i, sample)| {
+        *sample = (TAU * freq * i as f32 / sample_rate as f32).sin();
+    });
     (samples, sample_rate)
 }
 
@@ -119,25 +133,24 @@ fn synthesise_sine(freq: f32, sample_rate: u32, duration_secs: f32) -> (Vec<f32>
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    // ── Validate fft_size ──────────────────────────────────────────────────
-    if !is_power_of_two(args.fft_size) {
-        return Err(anyhow!("--fft-size {} is not a power of two", args.fft_size));
-    }
-
     // ── Load or synthesise audio ───────────────────────────────────────────
-    let (mono, sample_rate) = if let Some(ref spec) = args.generate_sine {
+    let (mut mono, sample_rate) = if let Some(ref spec) = args.generate_sine {
         let parts: Vec<&str> = spec.split(',').collect();
         if parts.len() != 3 {
-            return Err(anyhow!("--generate-sine format: freq_hz,sample_rate,duration_secs"));
+            return Err(anyhow!(
+                "--generate-sine format: freq_hz,sample_rate,duration_secs"
+            ));
         }
-        let freq: f32  = parts[0].trim().parse()?;
-        let sr:   u32  = parts[1].trim().parse()?;
-        let dur:  f32  = parts[2].trim().parse()?;
+        let freq: f32 = parts[0].trim().parse()?;
+        let sr: u32 = parts[1].trim().parse()?;
+        let dur: f32 = parts[2].trim().parse()?;
         eprintln!("  Synthesising {:.1} Hz sine, {} Hz, {:.2}s", freq, sr, dur);
         let (s, r) = synthesise_sine(freq, sr, dur);
         (s, r)
     } else {
-        let input = args.input.as_ref()
+        let input = args
+            .input
+            .as_ref()
             .ok_or_else(|| anyhow!("Provide an INPUT file or use --generate-sine"))?;
         let (samples, info) = load_wav(input)?;
         eprintln!(
@@ -147,15 +160,51 @@ fn main() -> Result<()> {
             info.sample_rate,
             info.channels,
         );
+        eprintln!("  Samples : {}", info.num_samples);
         (samples, info.sample_rate)
     };
 
+    if args.apply_full_hann {
+        eprintln!("  Applying full-signal Hann window …");
+        apply_hann_window_in_place(&mut mono);
+    }
+
+    if let Some(path) = args.write_generated_wav.as_deref() {
+        write_wav_f32(path, &mono, sample_rate)?;
+        eprintln!("  Wrote    : {:?}", path);
+    }
+
+    if args.whole_file_benchmark {
+        eprintln!();
+        eprintln!(
+            "  Running whole-file benchmark ({} repeat{}) …",
+            args.bench_repeats,
+            if args.bench_repeats == 1 { "" } else { "s" },
+        );
+        let results =
+            whole_fft::run_whole_signal_benchmark(&mono, sample_rate, args.bench_repeats)?;
+        whole_fft::print_whole_signal_table(&results, mono.len(), sample_rate);
+        return Ok(());
+    }
+
+    // ── Validate FFT framing params ────────────────────────────────────────
+    if !is_power_of_two(args.fft_size) {
+        return Err(anyhow!(
+            "--fft-size {} is not a power of two",
+            args.fft_size
+        ));
+    }
+    let hop = args.hop.unwrap_or(args.fft_size / 2);
+    if hop == 0 {
+        return Err(anyhow!("--hop must be greater than zero"));
+    }
+
     // ── Build backend ──────────────────────────────────────────────────────
     let force = match args.backend {
-        BackendChoice::Auto  => None,
-        BackendChoice::Cuda  => Some("cuda"),
+        BackendChoice::Auto => None,
+        BackendChoice::Cuda => Some("cuda"),
         BackendChoice::Metal => Some("metal"),
-        BackendChoice::Cpu   => Some("cpu"),
+        BackendChoice::Cpu => Some("cpu"),
     };
     let backend: Arc<dyn backends::FftBackend> = select_backend(force);
     eprintln!("  Backend : {}", backend.name().green().bold());
@@ -163,36 +212,40 @@ fn main() -> Result<()> {
     // ── Frame the signal ───────────────────────────────────────────────────
     // GPU backends (CUDA v2, Metal v2) apply the Hann window on-device.
     // For the CPU backend we apply it here on the host.
-    let hop      = args.hop.unwrap_or(args.fft_size / 2);
-    let is_gpu   = !matches!(force, Some("cpu")) && backend.name().contains("GPU")
-                   || backend.name().contains("CUDA");
-    let window   = hann_window(args.fft_size);
+    let is_gpu = !matches!(force, Some("cpu")) && backend.name().contains("GPU")
+        || backend.name().contains("CUDA");
+    let window = hann_window(args.fft_size);
     let flat_win = vec![1.0f32; args.fft_size]; // identity — GPU will window
-    let win_ref  = if is_gpu { &flat_win } else { &window };
-    let frames   = frame_signal(&mono, args.fft_size, hop, win_ref);
+    let win_ref = if is_gpu { &flat_win } else { &window };
+    let frames = frame_signal(&mono, args.fft_size, hop, win_ref);
     eprintln!(
         "  Frames  : {}  (size={}, hop={})",
-        frames.len(), args.fft_size, hop
+        frames.len(),
+        args.fft_size,
+        hop
     );
 
     // ── Benchmark mode ────────────────────────────────────────────────────
     if args.benchmark {
         eprintln!();
         eprintln!("  Running benchmark ({} repeats) …", args.bench_repeats);
-        let (gpu_res, cpu_res) = benchmark::run(
-            &backend, &frames, args.fft_size, args.bench_repeats,
-        )?;
+        let (gpu_res, cpu_res) =
+            benchmark::run(&backend, &frames, args.fft_size, args.bench_repeats)?;
         benchmark::print_table(&gpu_res, &cpu_res);
         return Ok(());
     }
 
     // ── Compute FFTs ───────────────────────────────────────────────────────
-    let batch_size = if args.batch_size == 0 { frames.len() } else { args.batch_size };
+    let batch_size = if args.batch_size == 0 {
+        frames.len()
+    } else {
+        args.batch_size
+    };
 
     let pb = ProgressBar::new(frames.len() as u64);
     pb.set_style(
         ProgressStyle::with_template(
-            "  {bar:40.cyan/blue} {pos}/{len} frames  [{elapsed_precise}]"
+            "  {bar:40.cyan/blue} {pos}/{len} frames  [{elapsed_precise}]",
         )
         .unwrap()
         .progress_chars("█▉▊▋▌▍▎▏ "),
