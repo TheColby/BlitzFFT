@@ -92,11 +92,11 @@ pub fn print_table(gpu: &BenchResult, cpu: &BenchResult) {
     );
     println!("  {}", "─".repeat(56));
     println!(
-        "  {:<28} {:>10.3}  {:>10.3} Mfft/s",
+        "  {:<28} {:>10.6}  {:>10.6} Mfft/s",
         gpu.backend_name, gpu.elapsed_ms, gpu.throughput_mfft
     );
     println!(
-        "  {:<28} {:>10.3}  {:>10.3} Mfft/s",
+        "  {:<28} {:>10.6}  {:>10.6} Mfft/s",
         cpu.backend_name, cpu.elapsed_ms, cpu.throughput_mfft
     );
     println!("  {}", "─".repeat(56));

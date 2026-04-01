@@ -81,8 +81,8 @@ struct Args {
     #[arg(long, value_enum, default_value = "hann")]
     window: WindowFunction,
 
-    /// Internal processing precision in bits
-    #[arg(long, value_enum, default_value = "32")]
+    /// Internal processing precision in bits (defaults to the highest supported internal precision)
+    #[arg(long, value_enum, default_value = "64")]
     precision: ProcessingPrecision,
 
     /// Output file (optional; stdout if omitted for text/csv)
@@ -166,7 +166,7 @@ fn main() -> Result<()> {
         .map_err(|err: String| anyhow!("--channel: {err}"))?;
     if args.precision == ProcessingPrecision::Bits128 {
         return Err(anyhow!(
-            "128-bit internal processing is not available in this build; use --precision 64 for double-precision CPU processing"
+            "128-bit internal processing is not available in this build; this build supports up to --precision 64"
         ));
     }
     if args.precision != ProcessingPrecision::Bits32
@@ -288,7 +288,7 @@ fn main() -> Result<()> {
     };
     if args.precision == ProcessingPrecision::Bits64 && args.benchmark {
         return Err(anyhow!(
-            "--benchmark currently compares the selected backend against the f32 CPU baseline; use normal analysis or --whole-file-benchmark with --precision 64"
+            "--benchmark currently compares the selected backend against the f32 CPU baseline; use --precision 32 for backend-vs-backend benchmarking, or use normal analysis / --whole-file-benchmark for 64-bit processing"
         ));
     }
     let backend: Arc<dyn backends::FftBackend> = select_backend(force);

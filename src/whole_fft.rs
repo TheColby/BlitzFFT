@@ -72,7 +72,7 @@ pub fn print_whole_signal_table(results: &[WholeFftBenchResult], len: usize, sam
     println!("  {}", "-".repeat(100));
     for result in results {
         println!(
-            "  {:<26} {:>12.3} {:>12.3} {:>12} {:>14.6} {:>14.3}",
+            "  {:<26} {:>12.6} {:>12.6} {:>12} {:>14.6} {:>14.6}",
             result.algorithm,
             result.setup_secs,
             result.exec_secs,
@@ -94,14 +94,18 @@ fn bench_blitzfft_real(
     let setup_start = Instant::now();
     let mut planner = RealFftPlanner::<f32>::new();
     let plan = planner.plan_fft_forward(len);
-    let mut input = vec![0.0f32; len];
+    let mut input = signal.to_vec();
     let mut output = plan.make_output_vec();
     let mut scratch = plan.make_scratch_vec();
     let setup_secs = setup_start.elapsed().as_secs_f64();
 
     let exec_start = Instant::now();
-    for _ in 0..repeats {
-        input.copy_from_slice(signal);
+    for repeat in 0..repeats {
+        // Reuse the already-owned signal buffer on the first run; later repeats
+        // repopulate it because realfft consumes the input slice as scratch.
+        if repeat != 0 {
+            input.copy_from_slice(signal);
+        }
         plan.process_with_scratch(&mut input, &mut output, &mut scratch)
             .map_err(|err| anyhow!("BlitzFFT exact-real path failed: {err}"))?;
     }
@@ -128,14 +132,18 @@ fn bench_blitzfft_real_f64(
     let setup_start = Instant::now();
     let mut planner = RealFftPlanner::<f64>::new();
     let plan = planner.plan_fft_forward(len);
-    let mut input = vec![0.0f64; len];
+    let mut input = signal.to_vec();
     let mut output = plan.make_output_vec();
     let mut scratch = plan.make_scratch_vec();
     let setup_secs = setup_start.elapsed().as_secs_f64();
 
     let exec_start = Instant::now();
-    for _ in 0..repeats {
-        input.copy_from_slice(signal);
+    for repeat in 0..repeats {
+        // Reuse the already-owned signal buffer on the first run; later repeats
+        // repopulate it because realfft consumes the input slice as scratch.
+        if repeat != 0 {
+            input.copy_from_slice(signal);
+        }
         plan.process_with_scratch(&mut input, &mut output, &mut scratch)
             .map_err(|err| anyhow!("BlitzFFT exact-real f64 path failed: {err}"))?;
     }
@@ -318,15 +326,13 @@ fn bench_kissfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
     let cfg =
         unsafe { kiss_fftr_alloc(len as c_int, 0, std::ptr::null_mut(), std::ptr::null_mut()) };
     let cfg: NonNull<c_void> = NonNull::new(cfg).context("kiss_fftr_alloc returned null")?;
-    let mut input = vec![0.0f32; len];
     let mut output = vec![KissFftCpx { r: 0.0, i: 0.0 }; len / 2 + 1];
     let setup_secs = setup_start.elapsed().as_secs_f64();
 
     let exec_start = Instant::now();
     for _ in 0..repeats {
-        input.copy_from_slice(signal);
         unsafe {
-            kiss_fftr(cfg.as_ptr(), input.as_ptr(), output.as_mut_ptr());
+            kiss_fftr(cfg.as_ptr(), signal.as_ptr(), output.as_mut_ptr());
         }
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
