@@ -1,6 +1,6 @@
 # audiofft
 
-GPU-accelerated FFT CLI for audio files.  
+GPU-accelerated FFT CLI, optimized for audio files, with 128-bit internal processing. Because why not?
 **CUDA (cuFFT) > Metal (Apple GPU) > CPU (RustFFT)** — auto-selected at runtime.
 
 ---
