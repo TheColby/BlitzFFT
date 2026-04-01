@@ -34,6 +34,54 @@ Results:
 | RustFFT complex | 1.015 | 4.379 | 1,584,000 | 440.000000 |
 | KissFFT | 0.758 | 5.240 | 1,584,000 | 440.000000 |
 
+## Tuning-Theory Aside
+
+The measured one-hour benchmark above is about exact FFT execution, not temperament theory, but the interval
+
+$$
+\Delta = 0.0002777778
+$$
+
+is also small enough to be interesting in logarithmic pitch space. If it is interpreted as a base-2 log-frequency interval, then
+
+$$
+\text{ratio} = 2^{0.0002777778} \approx 1.0001925
+$$
+
+and
+
+$$
+1200 \cdot 0.0002777778 = 0.33333336 \text{ cents}
+$$
+
+So the target is approximately `0.3333` cents, or a frequency ratio of `1.0001925`.
+
+It is also exactly one step of `3600-EDO`, because
+
+$$
+\frac{1200}{3600} = \frac{1}{3} \text{ cent}
+$$
+
+for each equal division of the octave.
+
+That is smaller than the usual standard named commas. A practical nearby comparison is one sixth of a schisma:
+
+$$
+\text{schisma} \approx 1.95 \text{ cents}
+$$
+
+$$
+\frac{1.95}{6} \approx 0.325 \text{ cents}
+$$
+
+So
+
+$$
+\frac{1}{6}\text{ schisma} \approx 0.325 \text{ cents}
+$$
+
+which is extremely close to `0.3333` cents, with an error of about `0.008` cents.
+
 ## Estimated Scaling To Multi-Day FFTs
 
 The one-hour benchmark above is the measured anchor point:

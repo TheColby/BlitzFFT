@@ -226,6 +226,59 @@ $$
 
 This mode exists to compare transform engines and data-motion costs, not to provide time-local spectral evolution.
 
+### Tuning-theory interpretation of a tiny interval
+
+The value above is a linear frequency-bin spacing in hertz. If, separately, you want to think about a similarly sized interval in logarithmic pitch space, take
+
+$$
+\Delta = 0.0002777778
+$$
+
+interpreted as a base-2 log-frequency interval. The corresponding frequency ratio is
+
+$$
+\text{ratio} = 2^{0.0002777778} \approx 1.0001925
+$$
+
+and the equivalent size in cents is
+
+$$
+1200 \cdot 0.0002777778 = 0.33333336 \text{ cents}
+$$
+
+So that target interval is approximately:
+
+- `0.3333` cents
+- `1.0001925` as a frequency ratio
+
+It is also exactly one step of `3600-EDO`, since
+
+$$
+\frac{1200}{3600} = \frac{1}{3} \text{ cent}
+$$
+
+per equal division of the octave.
+
+This is smaller than the usual named commas in tuning theory. A useful nearby reference is one sixth of a schisma. Using
+
+$$
+\text{schisma} \approx 1.95 \text{ cents}
+$$
+
+gives
+
+$$
+\frac{1.95}{6} \approx 0.325 \text{ cents}
+$$
+
+so
+
+$$
+\frac{1}{6}\text{ schisma} \approx 0.325 \text{ cents}
+$$
+
+which is very close to `0.3333` cents, with an error of about `0.008` cents.
+
 ## Project architecture
 
 At a high level, the project is organized like this:
