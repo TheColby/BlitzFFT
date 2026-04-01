@@ -33,3 +33,35 @@ Results:
 | FFTW3f | 0.206 | 4.096 | 1,584,000 | 440.000000 |
 | RustFFT complex | 1.015 | 4.379 | 1,584,000 | 440.000000 |
 | KissFFT | 0.758 | 5.240 | 1,584,000 | 440.000000 |
+
+## Estimated Scaling To Multi-Day FFTs
+
+The one-hour benchmark above is the measured anchor point:
+
+$$
+N_0 = 172{,}800{,}000
+$$
+
+To estimate how the whole-file execution time grows for longer exact transforms, the chart below extrapolates the measured `Exec` times with the standard FFT-size model
+
+$$
+\hat{T}(N) = T(N_0) \frac{N \log_2 N}{N_0 \log_2 N_0}
+$$
+
+This graph is intended as a planning aid, not as a claim that every duration shown was benchmarked directly. In particular, it does not try to capture host-memory limits, paging, NUMA effects, planner strategy changes, or other system effects that become more visible at very large sizes.
+
+To regenerate the chart after updating the one-hour benchmark anchor, run:
+
+```bash
+python3 scripts/generate_whole_fft_scaling_svg.py
+```
+
+![Estimated whole-file FFT execution time scaling](whole_file_fft_scaling.svg)
+
+Estimated execution times at the multi-day end of the curve:
+
+| Duration | Samples | PocketFFT | RealFFT | BlitzFFT exact-real | FFTW3f | RustFFT complex | KissFFT |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 24 hr | 4,147,200,000 | 34.018 s | 64.757 s | 70.277 s | 114.775 s | 122.705 s | 146.831 s |
+| 48 hr | 8,294,400,000 | 70.165 s | 133.568 s | 144.954 s | 236.735 s | 253.091 s | 302.854 s |
+| 72 hr | 12,441,600,000 | 107.116 s | 203.909 s | 221.291 s | 361.406 s | 386.377 s | 462.346 s |
