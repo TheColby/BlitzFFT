@@ -64,13 +64,24 @@ def format_samples(samples: int) -> str:
 
 
 def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
-    width, height = 1120, 760
-    margin_left, margin_right, margin_top, margin_bottom = 110, 40, 60, 120
+    width, height = 1320, 860
+    margin_left, margin_right, margin_top, margin_bottom = 110, 280, 88, 170
     plot_width = width - margin_left - margin_right
     plot_height = height - margin_top - margin_bottom
     y_min, y_max = 0.01, 1000.0
     log_min = math.log10(y_min)
     log_max = math.log10(y_max)
+    anchor_index = next(
+        index for index, (label, _seconds) in enumerate(DURATIONS) if label == ANCHOR_DURATION_LABEL
+    )
+    line_styles = {
+        "PocketFFT": "",
+        "RealFFT": "9 7",
+        "BlitzFFT exact-real": "",
+        "FFTW3f": "14 8",
+        "RustFFT complex": "4 6",
+        "KissFFT": "18 8 4 8",
+    }
 
     def x_pos(index: int) -> float:
         return margin_left + index * plot_width / (len(DURATIONS) - 1)
@@ -78,6 +89,26 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     def y_pos(value: float) -> float:
         lv = math.log10(value)
         return margin_top + (log_max - lv) / (log_max - log_min) * plot_height
+
+    def relax_label_positions(items: list[tuple[float, str, str, float]]) -> list[tuple[float, str, str, float]]:
+        min_gap = 24.0
+        low = margin_top + 14
+        high = margin_top + plot_height - 14
+        relaxed = sorted(items, key=lambda item: item[0])
+        for idx in range(1, len(relaxed)):
+            prev_y = relaxed[idx - 1][0]
+            y, name, color, value = relaxed[idx]
+            if y - prev_y < min_gap:
+                relaxed[idx] = (prev_y + min_gap, name, color, value)
+        for idx in range(len(relaxed) - 2, -1, -1):
+            next_y = relaxed[idx + 1][0]
+            y, name, color, value = relaxed[idx]
+            if next_y - y < min_gap:
+                relaxed[idx] = (next_y - min_gap, name, color, value)
+        return [
+            (min(max(y, low), high), name, color, value)
+            for y, name, color, value in relaxed
+        ]
 
     parts: list[str] = []
     add = parts.append
@@ -96,14 +127,13 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     add('<rect width="100%" height="100%" fill="#ffffff"/>')
     add(
         '<text x="110" y="34" font-family="Helvetica, Arial, sans-serif" '
-        'font-size="28" font-weight="700" fill="#111827">'
+        'font-size="30" font-weight="700" fill="#111827">'
         "Estimated Exact FFT Execution Time vs Signal Length</text>"
     )
     add(
-        '<text x="110" y="58" font-family="Helvetica, Arial, sans-serif" '
-        'font-size="16" fill="#4b5563">'
-        "48 kHz mono whole-file FFTs; curves extrapolated from the measured "
-        "1-hour benchmark with T_est(N) = T(N0) * N log2 N / (N0 log2 N0)</text>"
+        '<text x="110" y="60" font-family="Helvetica, Arial, sans-serif" '
+        'font-size="17" fill="#4b5563">'
+        "48 kHz mono whole-file FFTs. Only the 1-hour point is measured; the rest use N log2 N scaling.</text>"
     )
 
     for tick in [0.01, 0.1, 1, 10, 100, 1000]:
@@ -127,23 +157,28 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
         f'x2="{width - margin_right}" y2="{height - margin_bottom}" '
         'stroke="#111827" stroke-width="1.5"/>'
     )
+    anchor_x = x_pos(anchor_index)
+    add(
+        f'<line x1="{anchor_x:.2f}" y1="{margin_top}" x2="{anchor_x:.2f}" '
+        f'y2="{height - margin_bottom}" stroke="#9ca3af" stroke-width="1.5" '
+        'stroke-dasharray="6 6"/>'
+    )
+    add(
+        f'<text x="{anchor_x + 10:.2f}" y="{margin_top + 18:.2f}" '
+        'font-family="Helvetica, Arial, sans-serif" font-size="14" '
+        'font-weight="700" fill="#4b5563">Measured 1-hour anchor</text>'
+    )
 
     for index, (label, seconds) in enumerate(DURATIONS):
         x = x_pos(index)
-        samples = SAMPLE_RATE * seconds
         add(
             f'<line x1="{x:.2f}" y1="{height - margin_bottom}" x2="{x:.2f}" '
             f'y2="{height - margin_bottom + 8}" stroke="#111827" stroke-width="1"/>'
         )
         add(
             f'<text x="{x:.2f}" y="{height - margin_bottom + 28}" text-anchor="middle" '
-            'font-family="Helvetica, Arial, sans-serif" font-size="14" '
+            'font-family="Helvetica, Arial, sans-serif" font-size="15" '
             f'fill="#374151">{escape(label)}</text>'
-        )
-        add(
-            f'<text x="{x:.2f}" y="{height - margin_bottom + 48}" text-anchor="middle" '
-            'font-family="Helvetica, Arial, sans-serif" font-size="12" '
-            f'fill="#6b7280">N={escape(format_samples(samples))}</text>'
         )
 
     axis_y = margin_top + plot_height / 2
@@ -159,59 +194,58 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
         'font-size="16" fill="#111827">Exact whole-file FFT size at 48 kHz</text>'
     )
 
+    end_labels: list[tuple[float, str, str, float]] = []
     for name, (values, color) in series.items():
         points = " ".join(
             f"{x_pos(index):.2f},{y_pos(value):.2f}"
             for index, value in enumerate(values)
         )
+        dash = line_styles.get(name, "")
+        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
         add(
-            f'<polyline fill="none" stroke="{color}" stroke-width="3" '
-            f'points="{points}"/>'
+            f'<polyline fill="none" stroke="{color}" stroke-width="4" '
+            f'stroke-linecap="round" stroke-linejoin="round"{dash_attr} points="{points}"/>'
         )
-        for index, value in enumerate(values):
+        for index in (anchor_index, len(values) - 1):
+            value = values[index]
             x = x_pos(index)
             y = y_pos(value)
             add(
-                f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4.5" fill="{color}" '
-                'stroke="#ffffff" stroke-width="1.5"/>'
+                f'<circle cx="{x:.2f}" cy="{y:.2f}" r="5.5" fill="{color}" '
+                'stroke="#ffffff" stroke-width="2"/>'
             )
+        end_labels.append((y_pos(values[-1]), name, color, values[-1]))
 
-    legend_x = 735
-    legend_y = 92
-    add(
-        f'<rect x="{legend_x}" y="{legend_y}" width="320" height="168" rx="10" '
-        'fill="#ffffff" stroke="#d1d5db"/>'
-    )
-    add(
-        f'<text x="{legend_x + 16}" y="{legend_y + 24}" '
-        'font-family="Helvetica, Arial, sans-serif" font-size="16" '
-        'font-weight="700" fill="#111827">Algorithms</text>'
-    )
-    for idx, (name, (_values, color)) in enumerate(series.items()):
-        y = legend_y + 48 + idx * 20
+    label_line_x = width - margin_right + 18
+    label_text_x = label_line_x + 14
+    for y, name, color, value in relax_label_positions(end_labels):
+        end_x = x_pos(len(DURATIONS) - 1)
+        end_y = y_pos(series[name][0][-1])
         add(
-            f'<line x1="{legend_x + 16}" y1="{y}" x2="{legend_x + 42}" y2="{y}" '
-            f'stroke="{color}" stroke-width="3"/>'
+            f'<line x1="{end_x + 8:.2f}" y1="{end_y:.2f}" x2="{label_line_x:.2f}" y2="{y:.2f}" '
+            f'stroke="{color}" stroke-width="2.5"/>'
         )
         add(
-            f'<circle cx="{legend_x + 29}" cy="{y}" r="4" fill="{color}" '
-            'stroke="#fff" stroke-width="1"/>'
+            f'<text x="{label_text_x:.2f}" y="{y - 4:.2f}" '
+            'font-family="Helvetica, Arial, sans-serif" font-size="15" '
+            'font-weight="700" '
+            f'fill="{color}">{escape(name)}</text>'
         )
         add(
-            f'<text x="{legend_x + 52}" y="{y + 5}" '
-            'font-family="Helvetica, Arial, sans-serif" font-size="14" '
-            f'fill="#111827">{escape(name)}</text>'
+            f'<text x="{label_text_x:.2f}" y="{y + 14:.2f}" '
+            'font-family="Helvetica, Arial, sans-serif" font-size="13" '
+            f'fill="#4b5563">72 hr est. = {value:.1f} s</text>'
         )
 
     callout_x = 110
-    callout_y = 570
+    callout_y = 706
     callout_lines = [
+        "Samples at 48 kHz: 1 min = 2.88M, 1 hr = 172.8M, 24 hr = 4.147B, 72 hr = 12.442B",
         f"Measured anchor point: {ANCHOR_DURATION_LABEL}, 172.8M samples",
-        "Measured execution times come from benchmarks/60min_whole_file_fft.md",
         "Values away from that point are modeled estimates, not directly measured runs",
     ]
     add(
-        f'<rect x="{callout_x}" y="{callout_y}" width="980" height="116" rx="10" '
+        f'<rect x="{callout_x}" y="{callout_y}" width="1180" height="108" rx="12" '
         'fill="#f9fafb" stroke="#d1d5db"/>'
     )
     for idx, line in enumerate(callout_lines):

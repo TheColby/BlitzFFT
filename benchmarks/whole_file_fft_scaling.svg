@@ -1,125 +1,81 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="760" viewBox="0 0 1120 760" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="860" viewBox="0 0 1320 860" role="img" aria-labelledby="title desc">
 <title id="title">Estimated whole-file FFT execution time vs signal length</title>
 <desc id="desc">Log-scale chart of estimated execution time for BlitzFFT exact-real, RealFFT, PocketFFT, FFTW3f, RustFFT complex, and KissFFT from one minute to seventy-two hours at 48 kHz, extrapolated from the measured one-hour benchmark using N log2 N scaling.</desc>
 <rect width="100%" height="100%" fill="#ffffff"/>
-<text x="110" y="34" font-family="Helvetica, Arial, sans-serif" font-size="28" font-weight="700" fill="#111827">Estimated Exact FFT Execution Time vs Signal Length</text>
-<text x="110" y="58" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#4b5563">48 kHz mono whole-file FFTs; curves extrapolated from the measured 1-hour benchmark with T_est(N) = T(N0) * N log2 N / (N0 log2 N0)</text>
-<line x1="110" y1="640.00" x2="1080" y2="640.00" stroke="#e5e7eb" stroke-width="1"/>
-<text x="96" y="645.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">0.01 s</text>
-<line x1="110" y1="524.00" x2="1080" y2="524.00" stroke="#e5e7eb" stroke-width="1"/>
-<text x="96" y="529.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">0.1 s</text>
-<line x1="110" y1="408.00" x2="1080" y2="408.00" stroke="#e5e7eb" stroke-width="1"/>
-<text x="96" y="413.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">1 s</text>
-<line x1="110" y1="292.00" x2="1080" y2="292.00" stroke="#e5e7eb" stroke-width="1"/>
-<text x="96" y="297.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">10 s</text>
-<line x1="110" y1="176.00" x2="1080" y2="176.00" stroke="#e5e7eb" stroke-width="1"/>
-<text x="96" y="181.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">100 s</text>
-<line x1="110" y1="60.00" x2="1080" y2="60.00" stroke="#e5e7eb" stroke-width="1"/>
-<text x="96" y="65.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">1000 s</text>
-<line x1="110" y1="60" x2="110" y2="640" stroke="#111827" stroke-width="1.5"/>
-<line x1="110" y1="640" x2="1080" y2="640" stroke="#111827" stroke-width="1.5"/>
-<line x1="110.00" y1="640" x2="110.00" y2="648" stroke="#111827" stroke-width="1"/>
-<text x="110.00" y="668" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">1 min</text>
-<text x="110.00" y="688" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">N=2.88M</text>
-<line x1="248.57" y1="640" x2="248.57" y2="648" stroke="#111827" stroke-width="1"/>
-<text x="248.57" y="668" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">10 min</text>
-<text x="248.57" y="688" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">N=28.80M</text>
-<line x1="387.14" y1="640" x2="387.14" y2="648" stroke="#111827" stroke-width="1"/>
-<text x="387.14" y="668" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">1 hr</text>
-<text x="387.14" y="688" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">N=172.80M</text>
-<line x1="525.71" y1="640" x2="525.71" y2="648" stroke="#111827" stroke-width="1"/>
-<text x="525.71" y="668" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">6 hr</text>
-<text x="525.71" y="688" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">N=1.037B</text>
-<line x1="664.29" y1="640" x2="664.29" y2="648" stroke="#111827" stroke-width="1"/>
-<text x="664.29" y="668" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">12 hr</text>
-<text x="664.29" y="688" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">N=2.074B</text>
-<line x1="802.86" y1="640" x2="802.86" y2="648" stroke="#111827" stroke-width="1"/>
-<text x="802.86" y="668" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">24 hr</text>
-<text x="802.86" y="688" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">N=4.147B</text>
-<line x1="941.43" y1="640" x2="941.43" y2="648" stroke="#111827" stroke-width="1"/>
-<text x="941.43" y="668" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">48 hr</text>
-<text x="941.43" y="688" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">N=8.294B</text>
-<line x1="1080.00" y1="640" x2="1080.00" y2="648" stroke="#111827" stroke-width="1"/>
-<text x="1080.00" y="668" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">72 hr</text>
-<text x="1080.00" y="688" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#6b7280">N=12.442B</text>
-<text x="32" y="350.00" transform="rotate(-90 32 350.00)" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#111827">Estimated execution time (seconds, log scale)</text>
-<text x="595.00" y="732" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#111827">Exact whole-file FFT size at 48 kHz</text>
-<polyline fill="none" stroke="#1f77b4" stroke-width="3" points="110.00,616.75 248.57,493.50 387.14,398.23 525.71,303.42 664.29,266.84 802.86,230.32 941.43,193.85 1080.00,172.54"/>
-<circle cx="110.00" cy="616.75" r="4.5" fill="#1f77b4" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="248.57" cy="493.50" r="4.5" fill="#1f77b4" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="387.14" cy="398.23" r="4.5" fill="#1f77b4" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="525.71" cy="303.42" r="4.5" fill="#1f77b4" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="664.29" cy="266.84" r="4.5" fill="#1f77b4" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="802.86" cy="230.32" r="4.5" fill="#1f77b4" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="941.43" cy="193.85" r="4.5" fill="#1f77b4" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="1080.00" cy="172.54" r="4.5" fill="#1f77b4" stroke="#ffffff" stroke-width="1.5"/>
-<polyline fill="none" stroke="#2ca02c" stroke-width="3" points="110.00,584.32 248.57,461.06 387.14,365.80 525.71,270.99 664.29,234.41 802.86,197.89 941.43,161.42 1080.00,140.11"/>
-<circle cx="110.00" cy="584.32" r="4.5" fill="#2ca02c" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="248.57" cy="461.06" r="4.5" fill="#2ca02c" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="387.14" cy="365.80" r="4.5" fill="#2ca02c" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="525.71" cy="270.99" r="4.5" fill="#2ca02c" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="664.29" cy="234.41" r="4.5" fill="#2ca02c" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="802.86" cy="197.89" r="4.5" fill="#2ca02c" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="941.43" cy="161.42" r="4.5" fill="#2ca02c" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="1080.00" cy="140.11" r="4.5" fill="#2ca02c" stroke="#ffffff" stroke-width="1.5"/>
-<polyline fill="none" stroke="#d62728" stroke-width="3" points="110.00,580.19 248.57,456.94 387.14,361.68 525.71,266.87 664.29,230.29 802.86,193.77 941.43,157.30 1080.00,135.98"/>
-<circle cx="110.00" cy="580.19" r="4.5" fill="#d62728" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="248.57" cy="456.94" r="4.5" fill="#d62728" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="387.14" cy="361.68" r="4.5" fill="#d62728" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="525.71" cy="266.87" r="4.5" fill="#d62728" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="664.29" cy="230.29" r="4.5" fill="#d62728" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="802.86" cy="193.77" r="4.5" fill="#d62728" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="941.43" cy="157.30" r="4.5" fill="#d62728" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="1080.00" cy="135.98" r="4.5" fill="#d62728" stroke="#ffffff" stroke-width="1.5"/>
-<polyline fill="none" stroke="#9467bd" stroke-width="3" points="110.00,555.48 248.57,432.23 387.14,336.97 525.71,242.15 664.29,205.58 802.86,169.06 941.43,132.59 1080.00,111.27"/>
-<circle cx="110.00" cy="555.48" r="4.5" fill="#9467bd" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="248.57" cy="432.23" r="4.5" fill="#9467bd" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="387.14" cy="336.97" r="4.5" fill="#9467bd" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="525.71" cy="242.15" r="4.5" fill="#9467bd" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="664.29" cy="205.58" r="4.5" fill="#9467bd" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="802.86" cy="169.06" r="4.5" fill="#9467bd" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="941.43" cy="132.59" r="4.5" fill="#9467bd" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="1080.00" cy="111.27" r="4.5" fill="#9467bd" stroke="#ffffff" stroke-width="1.5"/>
-<polyline fill="none" stroke="#ff7f0e" stroke-width="3" points="110.00,552.12 248.57,428.86 387.14,333.60 525.71,238.79 664.29,202.21 802.86,165.69 941.43,129.22 1080.00,107.91"/>
-<circle cx="110.00" cy="552.12" r="4.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="248.57" cy="428.86" r="4.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="387.14" cy="333.60" r="4.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="525.71" cy="238.79" r="4.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="664.29" cy="202.21" r="4.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="802.86" cy="165.69" r="4.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="941.43" cy="129.22" r="4.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="1080.00" cy="107.91" r="4.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="1.5"/>
-<polyline fill="none" stroke="#8c564b" stroke-width="3" points="110.00,543.07 248.57,419.82 387.14,324.56 525.71,229.74 664.29,193.17 802.86,156.65 941.43,120.18 1080.00,98.86"/>
-<circle cx="110.00" cy="543.07" r="4.5" fill="#8c564b" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="248.57" cy="419.82" r="4.5" fill="#8c564b" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="387.14" cy="324.56" r="4.5" fill="#8c564b" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="525.71" cy="229.74" r="4.5" fill="#8c564b" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="664.29" cy="193.17" r="4.5" fill="#8c564b" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="802.86" cy="156.65" r="4.5" fill="#8c564b" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="941.43" cy="120.18" r="4.5" fill="#8c564b" stroke="#ffffff" stroke-width="1.5"/>
-<circle cx="1080.00" cy="98.86" r="4.5" fill="#8c564b" stroke="#ffffff" stroke-width="1.5"/>
-<rect x="735" y="92" width="320" height="168" rx="10" fill="#ffffff" stroke="#d1d5db"/>
-<text x="751" y="116" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#111827">Algorithms</text>
-<line x1="751" y1="140" x2="777" y2="140" stroke="#1f77b4" stroke-width="3"/>
-<circle cx="764" cy="140" r="4" fill="#1f77b4" stroke="#fff" stroke-width="1"/>
-<text x="787" y="145" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#111827">PocketFFT</text>
-<line x1="751" y1="160" x2="777" y2="160" stroke="#2ca02c" stroke-width="3"/>
-<circle cx="764" cy="160" r="4" fill="#2ca02c" stroke="#fff" stroke-width="1"/>
-<text x="787" y="165" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#111827">RealFFT</text>
-<line x1="751" y1="180" x2="777" y2="180" stroke="#d62728" stroke-width="3"/>
-<circle cx="764" cy="180" r="4" fill="#d62728" stroke="#fff" stroke-width="1"/>
-<text x="787" y="185" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#111827">BlitzFFT exact-real</text>
-<line x1="751" y1="200" x2="777" y2="200" stroke="#9467bd" stroke-width="3"/>
-<circle cx="764" cy="200" r="4" fill="#9467bd" stroke="#fff" stroke-width="1"/>
-<text x="787" y="205" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#111827">FFTW3f</text>
-<line x1="751" y1="220" x2="777" y2="220" stroke="#ff7f0e" stroke-width="3"/>
-<circle cx="764" cy="220" r="4" fill="#ff7f0e" stroke="#fff" stroke-width="1"/>
-<text x="787" y="225" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#111827">RustFFT complex</text>
-<line x1="751" y1="240" x2="777" y2="240" stroke="#8c564b" stroke-width="3"/>
-<circle cx="764" cy="240" r="4" fill="#8c564b" stroke="#fff" stroke-width="1"/>
-<text x="787" y="245" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#111827">KissFFT</text>
-<rect x="110" y="570" width="980" height="116" rx="10" fill="#f9fafb" stroke="#d1d5db"/>
-<text x="128" y="598" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">Measured anchor point: 1 hr, 172.8M samples</text>
-<text x="128" y="626" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">Measured execution times come from benchmarks/60min_whole_file_fft.md</text>
-<text x="128" y="654" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">Values away from that point are modeled estimates, not directly measured runs</text>
+<text x="110" y="34" font-family="Helvetica, Arial, sans-serif" font-size="30" font-weight="700" fill="#111827">Estimated Exact FFT Execution Time vs Signal Length</text>
+<text x="110" y="60" font-family="Helvetica, Arial, sans-serif" font-size="17" fill="#4b5563">48 kHz mono whole-file FFTs. Only the 1-hour point is measured; the rest use N log2 N scaling.</text>
+<line x1="110" y1="690.00" x2="1040" y2="690.00" stroke="#e5e7eb" stroke-width="1"/>
+<text x="96" y="695.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">0.01 s</text>
+<line x1="110" y1="569.60" x2="1040" y2="569.60" stroke="#e5e7eb" stroke-width="1"/>
+<text x="96" y="574.60" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">0.1 s</text>
+<line x1="110" y1="449.20" x2="1040" y2="449.20" stroke="#e5e7eb" stroke-width="1"/>
+<text x="96" y="454.20" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">1 s</text>
+<line x1="110" y1="328.80" x2="1040" y2="328.80" stroke="#e5e7eb" stroke-width="1"/>
+<text x="96" y="333.80" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">10 s</text>
+<line x1="110" y1="208.40" x2="1040" y2="208.40" stroke="#e5e7eb" stroke-width="1"/>
+<text x="96" y="213.40" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">100 s</text>
+<line x1="110" y1="88.00" x2="1040" y2="88.00" stroke="#e5e7eb" stroke-width="1"/>
+<text x="96" y="93.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">1000 s</text>
+<line x1="110" y1="88" x2="110" y2="690" stroke="#111827" stroke-width="1.5"/>
+<line x1="110" y1="690" x2="1040" y2="690" stroke="#111827" stroke-width="1.5"/>
+<line x1="375.71" y1="88" x2="375.71" y2="690" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="6 6"/>
+<text x="385.71" y="106.00" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#4b5563">Measured 1-hour anchor</text>
+<line x1="110.00" y1="690" x2="110.00" y2="698" stroke="#111827" stroke-width="1"/>
+<text x="110.00" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">1 min</text>
+<line x1="242.86" y1="690" x2="242.86" y2="698" stroke="#111827" stroke-width="1"/>
+<text x="242.86" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">10 min</text>
+<line x1="375.71" y1="690" x2="375.71" y2="698" stroke="#111827" stroke-width="1"/>
+<text x="375.71" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">1 hr</text>
+<line x1="508.57" y1="690" x2="508.57" y2="698" stroke="#111827" stroke-width="1"/>
+<text x="508.57" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">6 hr</text>
+<line x1="641.43" y1="690" x2="641.43" y2="698" stroke="#111827" stroke-width="1"/>
+<text x="641.43" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">12 hr</text>
+<line x1="774.29" y1="690" x2="774.29" y2="698" stroke="#111827" stroke-width="1"/>
+<text x="774.29" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">24 hr</text>
+<line x1="907.14" y1="690" x2="907.14" y2="698" stroke="#111827" stroke-width="1"/>
+<text x="907.14" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">48 hr</text>
+<line x1="1040.00" y1="690" x2="1040.00" y2="698" stroke="#111827" stroke-width="1"/>
+<text x="1040.00" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">72 hr</text>
+<text x="32" y="389.00" transform="rotate(-90 32 389.00)" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#111827">Estimated execution time (seconds, log scale)</text>
+<text x="575.00" y="832" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#111827">Exact whole-file FFT size at 48 kHz</text>
+<polyline fill="none" stroke="#1f77b4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="110.00,665.86 242.86,537.94 375.71,439.06 508.57,340.65 641.43,302.69 774.29,264.78 907.14,226.93 1040.00,204.81"/>
+<circle cx="375.71" cy="439.06" r="5.5" fill="#1f77b4" stroke="#ffffff" stroke-width="2"/>
+<circle cx="1040.00" cy="204.81" r="5.5" fill="#1f77b4" stroke="#ffffff" stroke-width="2"/>
+<polyline fill="none" stroke="#2ca02c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 7" points="110.00,632.20 242.86,504.28 375.71,405.40 508.57,306.99 641.43,269.03 774.29,231.12 907.14,193.27 1040.00,171.14"/>
+<circle cx="375.71" cy="405.40" r="5.5" fill="#2ca02c" stroke="#ffffff" stroke-width="2"/>
+<circle cx="1040.00" cy="171.14" r="5.5" fill="#2ca02c" stroke="#ffffff" stroke-width="2"/>
+<polyline fill="none" stroke="#d62728" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="110.00,627.93 242.86,500.00 375.71,401.12 508.57,302.71 641.43,264.75 774.29,226.84 907.14,188.99 1040.00,166.87"/>
+<circle cx="375.71" cy="401.12" r="5.5" fill="#d62728" stroke="#ffffff" stroke-width="2"/>
+<circle cx="1040.00" cy="166.87" r="5.5" fill="#d62728" stroke="#ffffff" stroke-width="2"/>
+<polyline fill="none" stroke="#9467bd" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="14 8" points="110.00,602.28 242.86,474.35 375.71,375.47 508.57,277.06 641.43,239.10 774.29,201.19 907.14,163.34 1040.00,141.22"/>
+<circle cx="375.71" cy="375.47" r="5.5" fill="#9467bd" stroke="#ffffff" stroke-width="2"/>
+<circle cx="1040.00" cy="141.22" r="5.5" fill="#9467bd" stroke="#ffffff" stroke-width="2"/>
+<polyline fill="none" stroke="#ff7f0e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 6" points="110.00,598.78 242.86,470.86 375.71,371.98 508.57,273.57 641.43,235.61 774.29,197.70 907.14,159.85 1040.00,137.72"/>
+<circle cx="375.71" cy="371.98" r="5.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="2"/>
+<circle cx="1040.00" cy="137.72" r="5.5" fill="#ff7f0e" stroke="#ffffff" stroke-width="2"/>
+<polyline fill="none" stroke="#8c564b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="18 8 4 8" points="110.00,589.40 242.86,461.47 375.71,362.59 508.57,264.18 641.43,226.22 774.29,188.32 907.14,150.46 1040.00,128.34"/>
+<circle cx="375.71" cy="362.59" r="5.5" fill="#8c564b" stroke="#ffffff" stroke-width="2"/>
+<circle cx="1040.00" cy="128.34" r="5.5" fill="#8c564b" stroke="#ffffff" stroke-width="2"/>
+<line x1="1048.00" y1="128.34" x2="1058.00" y2="128.34" stroke="#8c564b" stroke-width="2.5"/>
+<text x="1072.00" y="124.34" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#8c564b">KissFFT</text>
+<text x="1072.00" y="142.34" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 462.3 s</text>
+<line x1="1048.00" y1="137.72" x2="1058.00" y2="152.34" stroke="#ff7f0e" stroke-width="2.5"/>
+<text x="1072.00" y="148.34" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#ff7f0e">RustFFT complex</text>
+<text x="1072.00" y="166.34" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 386.4 s</text>
+<line x1="1048.00" y1="141.22" x2="1058.00" y2="176.34" stroke="#9467bd" stroke-width="2.5"/>
+<text x="1072.00" y="172.34" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#9467bd">FFTW3f</text>
+<text x="1072.00" y="190.34" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 361.4 s</text>
+<line x1="1048.00" y1="166.87" x2="1058.00" y2="200.34" stroke="#d62728" stroke-width="2.5"/>
+<text x="1072.00" y="196.34" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#d62728">BlitzFFT exact-real</text>
+<text x="1072.00" y="214.34" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 221.3 s</text>
+<line x1="1048.00" y1="171.14" x2="1058.00" y2="224.34" stroke="#2ca02c" stroke-width="2.5"/>
+<text x="1072.00" y="220.34" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#2ca02c">RealFFT</text>
+<text x="1072.00" y="238.34" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 203.9 s</text>
+<line x1="1048.00" y1="204.81" x2="1058.00" y2="248.34" stroke="#1f77b4" stroke-width="2.5"/>
+<text x="1072.00" y="244.34" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#1f77b4">PocketFFT</text>
+<text x="1072.00" y="262.34" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 107.1 s</text>
+<rect x="110" y="706" width="1180" height="108" rx="12" fill="#f9fafb" stroke="#d1d5db"/>
+<text x="128" y="734" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">Samples at 48 kHz: 1 min = 2.88M, 1 hr = 172.8M, 24 hr = 4.147B, 72 hr = 12.442B</text>
+<text x="128" y="762" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">Measured anchor point: 1 hr, 172.8M samples</text>
+<text x="128" y="790" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">Values away from that point are modeled estimates, not directly measured runs</text>
 </svg>
