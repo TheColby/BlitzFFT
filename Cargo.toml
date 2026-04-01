@@ -1,0 +1,45 @@
+[package]
+name        = "audiofft"
+version     = "0.1.0"
+edition     = "2021"
+description = "GPU-accelerated FFT for audio — CUDA (cuFFT) and Metal backends"
+authors     = ["Colby Leider <colby@leider.org>"]
+
+[[bin]]
+name = "audiofft"
+path = "src/main.rs"
+
+# ── Features ────────────────────────────────────────────────────────────────
+[features]
+default  = []
+cuda     = ["dep:libloading"]      # cuFFT loaded at runtime via libloading
+metal    = ["dep:metal", "dep:objc", "dep:cocoa-foundation"]
+benchmark = []                     # emit timing stats
+
+# ── Core dependencies ────────────────────────────────────────────────────────
+[dependencies]
+clap         = { version = "4",  features = ["derive"] }
+hound        = "3"                              # WAV I/O
+rustfft      = "6"                              # CPU fallback
+num-complex  = "0.4"
+bytemuck     = { version = "1", features = ["derive"] }
+anyhow       = "1"
+thiserror    = "1"
+rayon        = "1"                              # parallel audio chunking
+once_cell    = "1"                              # lazy-init plan cache
+indicatif    = "0.17"                           # progress bar
+colored      = "2"
+
+# ── Runtime CUDA (dlopen cuFFT) ───────────────────────────────────────────
+libloading   = { version = "0.8", optional = true }
+
+# ── Metal (macOS / Apple Silicon) ────────────────────────────────────────
+metal             = { version = "0.27", optional = true }
+objc              = { version = "0.2", optional = true }
+cocoa-foundation  = { version = "0.1", optional = true }
+
+[profile.release]
+opt-level    = 3
+lto          = "fat"
+codegen-units = 1
+panic        = "abort"
