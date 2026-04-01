@@ -28,8 +28,9 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 
 use audio::{
-    apply_window_in_place, frame_signal, load_wav, window_coeffs, write_wav_f32,
-    ChannelSelection, WindowFunction,
+    apply_window_in_place, apply_window_in_place_f64, frame_signal, frame_signal_f64, load_wav,
+    window_coeffs, window_coeffs_f64, write_wav_f32, ChannelSelection, ProcessingPrecision,
+    WindowFunction,
 };
 use backends::select_backend;
 use output::{print_summary, write_frames, OutputFormat};
@@ -79,6 +80,10 @@ struct Args {
     /// Window applied to each analysis frame
     #[arg(long, value_enum, default_value = "hann")]
     window: WindowFunction,
+
+    /// Internal processing precision in bits
+    #[arg(long, value_enum, default_value = "32")]
+    precision: ProcessingPrecision,
 
     /// Output file (optional; stdout if omitted for text/csv)
     #[arg(short, long, value_name = "PATH")]
@@ -159,6 +164,19 @@ fn main() -> Result<()> {
         .channel
         .parse()
         .map_err(|err: String| anyhow!("--channel: {err}"))?;
+    if args.precision == ProcessingPrecision::Bits128 {
+        return Err(anyhow!(
+            "128-bit internal processing is not available in this build; use --precision 64 for double-precision CPU processing"
+        ));
+    }
+    if args.precision != ProcessingPrecision::Bits32
+        && matches!(args.backend, BackendChoice::Cuda | BackendChoice::Metal)
+    {
+        return Err(anyhow!(
+            "--precision {} is CPU-only; choose --backend cpu or leave backend on auto",
+            args.precision
+        ));
+    }
 
     // ── Load or synthesise audio ───────────────────────────────────────────
     let (mut mono, sample_rate) = if let Some(ref spec) = args.generate_sine {
@@ -191,6 +209,11 @@ fn main() -> Result<()> {
         eprintln!("  Channel : {}", channel_selection);
         (samples, info.sample_rate)
     };
+    let mut mono64 = if args.precision == ProcessingPrecision::Bits64 {
+        Some(mono.iter().copied().map(f64::from).collect::<Vec<_>>())
+    } else {
+        None
+    };
 
     let full_window = if args.apply_full_hann {
         Some(WindowFunction::Hann)
@@ -200,7 +223,11 @@ fn main() -> Result<()> {
 
     if let Some(window) = full_window {
         eprintln!("  Applying full-signal {} window …", window);
-        apply_window_in_place(&mut mono, window);
+        if let Some(ref mut mono64) = mono64 {
+            apply_window_in_place_f64(mono64, window);
+        } else {
+            apply_window_in_place(&mut mono, window);
+        }
     }
 
     if let Some(path) = args.write_generated_wav.as_deref() {
@@ -211,12 +238,16 @@ fn main() -> Result<()> {
     if args.whole_file_benchmark {
         eprintln!();
         eprintln!(
-            "  Running whole-file benchmark ({} repeat{}) …",
+            "  Running whole-file benchmark ({} repeat{}, precision={} bit) …",
             args.bench_repeats,
             if args.bench_repeats == 1 { "" } else { "s" },
+            args.precision
         );
-        let results =
-            whole_fft::run_whole_signal_benchmark(&mono, sample_rate, args.bench_repeats)?;
+        let results = if let Some(ref mono64) = mono64 {
+            whole_fft::run_whole_signal_benchmark_f64(mono64, sample_rate, args.bench_repeats)?
+        } else {
+            whole_fft::run_whole_signal_benchmark(&mono, sample_rate, args.bench_repeats)?
+        };
         whole_fft::print_whole_signal_table(&results, mono.len(), sample_rate);
         return Ok(());
     }
@@ -255,71 +286,108 @@ fn main() -> Result<()> {
         BackendChoice::Metal => Some("metal"),
         BackendChoice::Cpu => Some("cpu"),
     };
+    if args.precision == ProcessingPrecision::Bits64 && args.benchmark {
+        return Err(anyhow!(
+            "--benchmark currently compares the selected backend against the f32 CPU baseline; use normal analysis or --whole-file-benchmark with --precision 64"
+        ));
+    }
     let backend: Arc<dyn backends::FftBackend> = select_backend(force);
-    eprintln!("  Backend : {}", backend.name().green().bold());
+    let backend_label = if args.precision == ProcessingPrecision::Bits64 {
+        "RealFFT (CPU - f64 internal processing)".to_string()
+    } else {
+        backend.name().to_string()
+    };
+    eprintln!(
+        "  Backend : {}  (precision={} bit)",
+        backend_label.green().bold(),
+        args.precision
+    );
 
     // ── Frame the signal ───────────────────────────────────────────────────
     // GPU backends apply the standard Hann window on-device.
     // For other windows we apply coefficients on the host before upload.
-    let is_gpu = !matches!(force, Some("cpu")) && backend.name().contains("GPU")
-        || backend.name().contains("CUDA");
+    let is_gpu = args.precision == ProcessingPrecision::Bits32
+        && ((!matches!(force, Some("cpu")) && backend.name().contains("GPU"))
+            || backend.name().contains("CUDA"));
     let window = window_coeffs(args.window, args.fft_size);
     let flat_win = vec![1.0f32; args.fft_size]; // identity — GPU will window
     let gpu_applies_window = is_gpu && args.window == WindowFunction::Hann;
     let win_ref = if gpu_applies_window { &flat_win } else { &window };
-    let frames = frame_signal(&mono, args.fft_size, hop, win_ref);
-    eprintln!(
-        "  Frames  : {}  (size={}, hop={}, window={})",
-        frames.len(),
-        args.fft_size,
-        hop,
-        args.window
-    );
-
-    // ── Benchmark mode ────────────────────────────────────────────────────
-    if args.benchmark {
-        eprintln!();
-        eprintln!("  Running benchmark ({} repeats) …", args.bench_repeats);
-        let (gpu_res, cpu_res) =
-            benchmark::run(&backend, &frames, args.fft_size, args.bench_repeats)?;
-        benchmark::print_table(&gpu_res, &cpu_res);
-        return Ok(());
-    }
-
-    // ── Compute FFTs ───────────────────────────────────────────────────────
-    let batch_size = if args.batch_size == 0 {
-        frames.len()
+    let all_results = if let Some(ref mono64) = mono64 {
+        let t_start = Instant::now();
+        let window64 = window_coeffs_f64(args.window, args.fft_size);
+        let frames64 = frame_signal_f64(mono64, args.fft_size, hop, &window64);
+        eprintln!(
+            "  Frames  : {}  (size={}, hop={}, window={})",
+            frames64.len(),
+            args.fft_size,
+            hop,
+            args.window
+        );
+        let all_results = backends::cpu::compute_batch_f64(&frames64, args.fft_size)?;
+        let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+        eprintln!(
+            "  Done    : {:.2} ms total  ({:.1} μs/frame)",
+            elapsed_ms,
+            elapsed_ms * 1000.0 / all_results.len() as f64,
+        );
+        all_results
     } else {
-        args.batch_size
+        let frames = frame_signal(&mono, args.fft_size, hop, win_ref);
+        eprintln!(
+            "  Frames  : {}  (size={}, hop={}, window={})",
+            frames.len(),
+            args.fft_size,
+            hop,
+            args.window
+        );
+
+        // ── Benchmark mode ────────────────────────────────────────────────────
+        if args.benchmark {
+            eprintln!();
+            eprintln!("  Running benchmark ({} repeats) …", args.bench_repeats);
+            let (gpu_res, cpu_res) =
+                benchmark::run(&backend, &frames, args.fft_size, args.bench_repeats)?;
+            benchmark::print_table(&gpu_res, &cpu_res);
+            return Ok(());
+        }
+
+        // ── Compute FFTs ───────────────────────────────────────────────────────
+        let batch_size = if args.batch_size == 0 {
+            frames.len()
+        } else {
+            args.batch_size
+        };
+
+        let pb = ProgressBar::new(frames.len() as u64);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "  {bar:40.cyan/blue} {pos}/{len} frames  [{elapsed_precise}]",
+            )
+            .unwrap()
+            .progress_chars("█▉▊▋▌▍▎▏ "),
+        );
+
+        let mut all_results = Vec::with_capacity(frames.len());
+        let t_start = Instant::now();
+
+        for chunk in frames.chunks(batch_size) {
+            let refs: Vec<&[f32]> = chunk.iter().map(|v| v.as_slice()).collect();
+            let mut batch_results = backend.compute_batch(&refs, args.fft_size)?;
+            pb.inc(chunk.len() as u64);
+            all_results.append(&mut batch_results);
+        }
+
+        pb.finish_and_clear();
+
+        let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+        eprintln!(
+            "  Done    : {:.2} ms total  ({:.1} μs/frame)",
+            elapsed_ms,
+            elapsed_ms * 1000.0 / all_results.len() as f64,
+        );
+        all_results
     };
-
-    let pb = ProgressBar::new(frames.len() as u64);
-    pb.set_style(
-        ProgressStyle::with_template(
-            "  {bar:40.cyan/blue} {pos}/{len} frames  [{elapsed_precise}]",
-        )
-        .unwrap()
-        .progress_chars("█▉▊▋▌▍▎▏ "),
-    );
-
-    let mut all_results = Vec::with_capacity(frames.len());
-    let t_start = Instant::now();
-
-    for chunk in frames.chunks(batch_size) {
-        let refs: Vec<&[f32]> = chunk.iter().map(|v| v.as_slice()).collect();
-        let mut batch_results = backend.compute_batch(&refs, args.fft_size)?;
-        pb.inc(chunk.len() as u64);
-        all_results.append(&mut batch_results);
-    }
-
-    pb.finish_and_clear();
-
-    let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
-    eprintln!(
-        "  Done    : {:.2} ms total  ({:.1} μs/frame)",
-        elapsed_ms,
-        elapsed_ms * 1000.0 / all_results.len() as f64,
-    );
 
     // ── Optional summary ───────────────────────────────────────────────────
     if args.summary {

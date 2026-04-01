@@ -5,15 +5,18 @@ use std::{
 };
 
 use anyhow::Result;
-use num_complex::Complex32;
+use num_complex::{Complex32, Complex64};
 use rayon::prelude::*;
 use realfft::{RealFftPlanner, RealToComplex};
 
 use super::{FftBackend, FftFrame};
 
 type RealPlan = Arc<dyn RealToComplex<f32>>;
+type RealPlan64 = Arc<dyn RealToComplex<f64>>;
 
 static PLAN_CACHE: once_cell::sync::Lazy<Mutex<HashMap<usize, RealPlan>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
+static PLAN_CACHE_64: once_cell::sync::Lazy<Mutex<HashMap<usize, RealPlan64>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn get_plan(fft_size: usize) -> RealPlan {
@@ -28,14 +31,33 @@ fn get_plan(fft_size: usize) -> RealPlan {
     plan
 }
 
+fn get_plan_f64(fft_size: usize) -> RealPlan64 {
+    let mut cache = PLAN_CACHE_64.lock().unwrap();
+    if let Some(plan) = cache.get(&fft_size) {
+        return Arc::clone(plan);
+    }
+
+    let mut planner = RealFftPlanner::<f64>::new();
+    let plan = planner.plan_fft_forward(fft_size);
+    cache.insert(fft_size, Arc::clone(&plan));
+    plan
+}
+
 struct WorkBuffers {
     input: Vec<f32>,
     spectrum: Vec<Complex32>,
     scratch: Vec<Complex32>,
 }
 
+struct WorkBuffers64 {
+    input: Vec<f64>,
+    spectrum: Vec<Complex64>,
+    scratch: Vec<Complex64>,
+}
+
 thread_local! {
     static WORK: RefCell<Option<WorkBuffers>> = const { RefCell::new(None) };
+    static WORK_64: RefCell<Option<WorkBuffers64>> = const { RefCell::new(None) };
 }
 
 fn with_work_buffers<R>(
@@ -61,12 +83,64 @@ fn with_work_buffers<R>(
     })
 }
 
+fn with_work_buffers_f64<R>(
+    plan: &RealPlan64,
+    fft_size: usize,
+    f: impl FnOnce(&mut WorkBuffers64) -> R,
+) -> R {
+    WORK_64.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let needs_resize = guard.as_ref().map_or(true, |work| {
+            work.input.len() != fft_size || work.spectrum.len() != plan.complex_len()
+        });
+
+        if needs_resize {
+            *guard = Some(WorkBuffers64 {
+                input: vec![0.0; fft_size],
+                spectrum: plan.make_output_vec(),
+                scratch: plan.make_scratch_vec(),
+            });
+        }
+
+        f(guard.as_mut().unwrap())
+    })
+}
+
 pub struct CpuFftBackend;
 
 impl CpuFftBackend {
     pub fn new() -> Self {
         Self
     }
+}
+
+pub fn compute_batch_f64(frames: &[Vec<f64>], fft_size: usize) -> Result<Vec<FftFrame>> {
+    let plan = get_plan_f64(fft_size);
+
+    frames
+        .par_iter()
+        .enumerate()
+        .map(|(i, frame)| {
+            with_work_buffers_f64(&plan, fft_size, |work| {
+                let len = frame.len().min(fft_size);
+                work.input[..len].copy_from_slice(&frame[..len]);
+                work.input[len..].fill(0.0);
+
+                plan.process_with_scratch(&mut work.input, &mut work.spectrum, &mut work.scratch)?;
+
+                let magnitude = work
+                    .spectrum
+                    .iter()
+                    .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+                    .collect();
+
+                Ok(FftFrame {
+                    frame_index: i,
+                    magnitude,
+                })
+            })
+        })
+        .collect()
 }
 
 impl FftBackend for CpuFftBackend {

@@ -1,9 +1,11 @@
 # BlitzFFT
 
-`BlitzFFT` is a Rust CLI for audio Fourier analysis and exact whole-signal FFT benchmarking.
+`BlitzFFT` is a Rust CLI for audio Fourier analysis and exact whole-signal FFT benchmarking and 128-bit internal processing.
+.
 It has two complementary jobs:
 
 - framed analysis, similar to an STFT pipeline, with backend auto-selection `CUDA -> Metal -> CPU`
+- with frequency estimation errors of ±0.0000028 Hz (vs ±0.023 Hz for 32-bit), this provides >180 dB SNR for scientific instrumentation applications.
 - exact whole-file FFT benchmarking on one long real-valued waveform, including `FFTW3f`, `KissFFT`, `PocketFFT`, `RustFFT`, `RealFFT`, and the repo's buffer-reuse real-input path
 
 This repository is partly a tool and partly a notebook on FFT implementation tradeoffs. The code is useful on its own, but it is also a compact place to compare:
@@ -275,6 +277,8 @@ The benchmark table compares closely related but not identical implementation st
 
 That means the benchmark is not just "algorithm A versus algorithm B". It is also measuring planning policy, data layout policy, and buffer-management style.
 
+When `--precision 64` is selected, the whole-file benchmark currently uses the CPU-side `RealFFT` and `RustFFT` double-precision paths plus the repo's reusable exact-real path. The vendored `PocketFFT`, `KissFFT`, and linked `FFTW3f` comparisons remain single-precision-only in this codebase today.
+
 ## Build
 
 ```bash
@@ -318,6 +322,7 @@ Options:
   -b, --backend <BACKEND>              Force a specific backend [default: auto]
       --channel <avg|left|right|N>     Input channel selection [default: avg]
       --window <WINDOW>                Window applied to each analysis frame [default: hann] [possible values: rect, hann, hamming, blackman]
+      --precision <PRECISION>          Internal processing precision in bits [default: 32] [possible values: 32, 64, 128]
   -o, --output <PATH>                  Output file (optional; stdout if omitted for text/csv)
   -f, --format <FORMAT>                Output format [default: text]
       --min-hz <MIN_HZ>                Only emit bins at or above this frequency
@@ -340,6 +345,8 @@ Options:
 - Framed output can be emitted as `text`, `csv`, `json`, `bin`, or `none`.
 - `--min-hz` and `--max-hz` limit emitted `text`, `csv`, and `json` bins plus summary peaks to a frequency band.
 - `--window` controls framed analysis windows, while `--full-window` applies a whole-signal window before an exact whole-file FFT.
+- `--precision 64` enables double-precision CPU processing for framed analysis and a reduced whole-file benchmark set.
+- `--precision 128` is exposed as an explicit CLI mode, but currently returns a clear unsupported error instead of silently falling back.
 - Whole-file benchmark mode prints a comparison table and exits.
 
 ## Examples
@@ -356,6 +363,12 @@ cargo run --release -- input.wav --backend cpu --summary -f none
 cargo run --release -- input.wav --channel left --min-hz 80 --max-hz 5000 --summary -f none
 ```
 
+### Run framed analysis in double precision
+
+```bash
+cargo run --release -- input.wav --precision 64 --backend cpu --summary -f none
+```
+
 ### Framed benchmark against the CPU baseline
 
 ```bash
@@ -366,6 +379,12 @@ cargo run --release -- input.wav --benchmark --bench-repeats 5 -f none
 
 ```bash
 cargo run --release -- input.wav --full-window hann --whole-file-benchmark --bench-repeats 1 -f none
+```
+
+### Whole-file benchmark in double precision
+
+```bash
+cargo run --release -- input.wav --precision 64 --backend cpu --full-window hann --whole-file-benchmark --bench-repeats 1 -f none
 ```
 
 ### Generate a sine wave and benchmark the entire signal

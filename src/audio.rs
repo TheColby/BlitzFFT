@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::ValueEnum;
 use hound::{SampleFormat, WavReader};
 use rayon::prelude::*;
+use rustfft::num_traits::Float;
 use std::{fmt, path::Path, str::FromStr};
 
 /// Raw audio metadata
@@ -63,6 +64,27 @@ pub enum WindowFunction {
     Hann,
     Hamming,
     Blackman,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ProcessingPrecision {
+    #[value(name = "32")]
+    Bits32,
+    #[value(name = "64")]
+    Bits64,
+    #[value(name = "128")]
+    Bits128,
+}
+
+impl fmt::Display for ProcessingPrecision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::Bits32 => "32",
+            Self::Bits64 => "64",
+            Self::Bits128 => "128",
+        };
+        write!(f, "{label}")
+    }
 }
 
 impl fmt::Display for WindowFunction {
@@ -182,30 +204,50 @@ where
 }
 
 pub fn window_coeffs(window: WindowFunction, size: usize) -> Vec<f32> {
+    window_coeffs_generic(window, size)
+}
+
+pub fn window_coeffs_f64(window: WindowFunction, size: usize) -> Vec<f64> {
+    window_coeffs_generic(window, size)
+}
+
+fn window_coeffs_generic<T: Float>(window: WindowFunction, size: usize) -> Vec<T> {
     use std::f64::consts::PI;
 
     if size <= 1 {
-        return vec![1.0; size];
+        return vec![T::one(); size];
     }
 
+    let cast = |v: f64| T::from(v).expect("window coefficient fits target float type");
     match window {
-        WindowFunction::Rect => vec![1.0; size],
+        WindowFunction::Rect => vec![T::one(); size],
         WindowFunction::Hann => (0..size)
-            .map(|n| (0.5 * (1.0 - (2.0 * PI * n as f64 / (size - 1) as f64).cos())) as f32)
+            .map(|n| cast(0.5 * (1.0 - (2.0 * PI * n as f64 / (size - 1) as f64).cos())))
             .collect(),
         WindowFunction::Hamming => (0..size)
-            .map(|n| (0.54 - 0.46 * (2.0 * PI * n as f64 / (size - 1) as f64).cos()) as f32)
+            .map(|n| cast(0.54 - 0.46 * (2.0 * PI * n as f64 / (size - 1) as f64).cos()))
             .collect(),
         WindowFunction::Blackman => (0..size)
             .map(|n| {
                 let phase = 2.0 * PI * n as f64 / (size - 1) as f64;
-                (0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos()) as f32
+                cast(0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos())
             })
             .collect(),
     }
 }
 
 pub fn apply_window_in_place(signal: &mut [f32], window: WindowFunction) {
+    apply_window_in_place_generic(signal, window);
+}
+
+pub fn apply_window_in_place_f64(signal: &mut [f64], window: WindowFunction) {
+    apply_window_in_place_generic(signal, window);
+}
+
+fn apply_window_in_place_generic<T>(signal: &mut [T], window: WindowFunction)
+where
+    T: Float + Send + Sync,
+{
     if signal.len() <= 1 {
         return;
     }
@@ -214,11 +256,11 @@ pub fn apply_window_in_place(signal: &mut [f32], window: WindowFunction) {
         return;
     }
 
-    let coeffs = window_coeffs(window, signal.len());
+    let coeffs = window_coeffs_generic(window, signal.len());
     signal
         .par_iter_mut()
         .zip(coeffs.into_par_iter())
-        .for_each(|(sample, coeff)| *sample *= coeff);
+        .for_each(|(sample, coeff)| *sample = *sample * coeff);
 }
 
 pub fn write_wav_f32(path: &Path, samples: &[f32], sample_rate: u32) -> Result<()> {
@@ -249,6 +291,22 @@ pub fn frame_signal<'a>(
     hop: usize,
     window: &[f32],
 ) -> Vec<Vec<f32>> {
+    frame_signal_generic(signal, fft_size, hop, window)
+}
+
+pub fn frame_signal_f64<'a>(
+    signal: &'a [f64],
+    fft_size: usize,
+    hop: usize,
+    window: &[f64],
+) -> Vec<Vec<f64>> {
+    frame_signal_generic(signal, fft_size, hop, window)
+}
+
+fn frame_signal_generic<T>(signal: &[T], fft_size: usize, hop: usize, window: &[T]) -> Vec<Vec<T>>
+where
+    T: Float + Copy,
+{
     if signal.is_empty() || hop == 0 {
         return vec![];
     }
@@ -265,7 +323,7 @@ pub fn frame_signal<'a>(
         let end = (offset + fft_size).min(signal.len());
         let src = &signal[offset..end];
 
-        let mut frame = vec![0.0f32; fft_size];
+        let mut frame = vec![T::zero(); fft_size];
         for (i, &s) in src.iter().enumerate() {
             frame[i] = s * window[i];
         }

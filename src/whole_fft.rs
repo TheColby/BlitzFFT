@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
-use num_complex::Complex32;
+use num_complex::{Complex32, Complex64};
 use realfft::RealFftPlanner;
 use rustfft::FftPlanner;
 
@@ -36,6 +36,21 @@ pub fn run_whole_signal_benchmark(
     results.push(bench_fftw(signal, sample_rate, repeats)?);
     results.push(bench_kissfft(signal, sample_rate, repeats)?);
     results.push(bench_pocketfft(signal, sample_rate, repeats)?);
+
+    Ok(results)
+}
+
+pub fn run_whole_signal_benchmark_f64(
+    signal: &[f64],
+    sample_rate: u32,
+    repeats: usize,
+) -> Result<Vec<WholeFftBenchResult>> {
+    let repeats = repeats.max(1);
+    let mut results = Vec::with_capacity(3);
+
+    results.push(bench_blitzfft_real_f64(signal, sample_rate, repeats)?);
+    results.push(bench_realfft_f64(signal, sample_rate, repeats)?);
+    results.push(bench_rustfft_f64(signal, sample_rate, repeats)?);
 
     Ok(results)
 }
@@ -103,6 +118,40 @@ fn bench_blitzfft_real(
     })
 }
 
+fn bench_blitzfft_real_f64(
+    signal: &[f64],
+    sample_rate: u32,
+    repeats: usize,
+) -> Result<WholeFftBenchResult> {
+    let len = signal.len();
+
+    let setup_start = Instant::now();
+    let mut planner = RealFftPlanner::<f64>::new();
+    let plan = planner.plan_fft_forward(len);
+    let mut input = vec![0.0f64; len];
+    let mut output = plan.make_output_vec();
+    let mut scratch = plan.make_scratch_vec();
+    let setup_secs = setup_start.elapsed().as_secs_f64();
+
+    let exec_start = Instant::now();
+    for _ in 0..repeats {
+        input.copy_from_slice(signal);
+        plan.process_with_scratch(&mut input, &mut output, &mut scratch)
+            .map_err(|err| anyhow!("BlitzFFT exact-real f64 path failed: {err}"))?;
+    }
+    let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
+    let (peak_bin, peak_mag) = peak_from_complex64(&output);
+
+    Ok(WholeFftBenchResult {
+        algorithm: "BlitzFFT exact-real (f64)",
+        setup_secs,
+        exec_secs,
+        peak_bin,
+        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_mag,
+    })
+}
+
 fn bench_realfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<WholeFftBenchResult> {
     let len = signal.len();
 
@@ -124,6 +173,39 @@ fn bench_realfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
 
     Ok(WholeFftBenchResult {
         algorithm: "RealFFT",
+        setup_secs,
+        exec_secs,
+        peak_bin,
+        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_mag,
+    })
+}
+
+fn bench_realfft_f64(
+    signal: &[f64],
+    sample_rate: u32,
+    repeats: usize,
+) -> Result<WholeFftBenchResult> {
+    let len = signal.len();
+
+    let setup_start = Instant::now();
+    let mut planner = RealFftPlanner::<f64>::new();
+    let plan = planner.plan_fft_forward(len);
+    let setup_secs = setup_start.elapsed().as_secs_f64();
+
+    let mut last_output = plan.make_output_vec();
+    let exec_start = Instant::now();
+    for _ in 0..repeats {
+        let mut input = signal.to_vec();
+        last_output.fill(Complex64::new(0.0, 0.0));
+        plan.process(&mut input, &mut last_output)
+            .map_err(|err| anyhow!("RealFFT f64 failed: {err}"))?;
+    }
+    let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
+    let (peak_bin, peak_mag) = peak_from_complex64(&last_output);
+
+    Ok(WholeFftBenchResult {
+        algorithm: "RealFFT (f64)",
         setup_secs,
         exec_secs,
         peak_bin,
@@ -154,6 +236,40 @@ fn bench_rustfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
 
     Ok(WholeFftBenchResult {
         algorithm: "RustFFT complex",
+        setup_secs,
+        exec_secs,
+        peak_bin,
+        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_mag,
+    })
+}
+
+fn bench_rustfft_f64(
+    signal: &[f64],
+    sample_rate: u32,
+    repeats: usize,
+) -> Result<WholeFftBenchResult> {
+    let len = signal.len();
+
+    let setup_start = Instant::now();
+    let mut planner = FftPlanner::<f64>::new();
+    let plan = planner.plan_fft_forward(len);
+    let mut buffer = vec![Complex64::new(0.0, 0.0); len];
+    let setup_secs = setup_start.elapsed().as_secs_f64();
+
+    let exec_start = Instant::now();
+    for _ in 0..repeats {
+        for (dst, &src) in buffer.iter_mut().zip(signal.iter()) {
+            *dst = Complex64::new(src, 0.0);
+        }
+        plan.process(&mut buffer);
+    }
+    let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
+    let half_len = len / 2 + 1;
+    let (peak_bin, peak_mag) = peak_from_complex64(&buffer[..half_len]);
+
+    Ok(WholeFftBenchResult {
+        algorithm: "RustFFT complex (f64)",
         setup_secs,
         exec_secs,
         peak_bin,
@@ -267,6 +383,18 @@ fn peak_from_complex32(values: &[Complex32]) -> (usize, f32) {
         let c = values[i];
         (c.re * c.re + c.im * c.im).sqrt()
     })
+}
+
+fn peak_from_complex64(values: &[Complex64]) -> (usize, f32) {
+    values
+        .iter()
+        .enumerate()
+        .map(|(i, value)| {
+            let mag = (value.re * value.re + value.im * value.im).sqrt() as f32;
+            (i, mag)
+        })
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .unwrap_or((0, 0.0))
 }
 
 unsafe fn peak_from_fftw(values: &[FftwComplex]) -> (usize, f32) {
