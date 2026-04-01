@@ -10,15 +10,13 @@ use num_complex::{Complex32, Complex64};
 use realfft::RealFftPlanner;
 use rustfft::FftPlanner;
 
-use crate::audio::bin_to_hz;
-
 #[derive(Debug, Clone)]
 pub struct WholeFftBenchResult {
     pub algorithm: &'static str,
     pub setup_secs: f64,
     pub exec_secs: f64,
     pub peak_bin: usize,
-    pub peak_freq_hz: f32,
+    pub peak_freq_hz: f64,
     pub peak_mag: f32,
 }
 
@@ -72,7 +70,7 @@ pub fn print_whole_signal_table(results: &[WholeFftBenchResult], len: usize, sam
     println!("  {}", "-".repeat(100));
     for result in results {
         println!(
-            "  {:<26} {:>12.6} {:>12.6} {:>12} {:>14.6} {:>14.6}",
+            "  {:<26} {:>12.6} {:>12.6} {:>12} {:>18.12} {:>14.6}",
             result.algorithm,
             result.setup_secs,
             result.exec_secs,
@@ -117,7 +115,7 @@ fn bench_blitzfft_real(
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
         peak_mag,
     })
 }
@@ -155,7 +153,7 @@ fn bench_blitzfft_real_f64(
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
         peak_mag,
     })
 }
@@ -184,7 +182,7 @@ fn bench_realfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
         peak_mag,
     })
 }
@@ -217,7 +215,7 @@ fn bench_realfft_f64(
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
         peak_mag,
     })
 }
@@ -247,7 +245,7 @@ fn bench_rustfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
         peak_mag,
     })
 }
@@ -281,7 +279,7 @@ fn bench_rustfft_f64(
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
         peak_mag,
     })
 }
@@ -308,7 +306,7 @@ fn bench_fftw(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<WholeF
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
         peak_mag,
     })
 }
@@ -347,7 +345,7 @@ fn bench_kissfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
         peak_mag,
     })
 }
@@ -379,9 +377,13 @@ fn bench_pocketfft(
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz(peak_bin, len, sample_rate),
+        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
         peak_mag,
     })
+}
+
+fn bin_to_hz_f64(bin: usize, fft_size: usize, sample_rate: u32) -> f64 {
+    bin as f64 * sample_rate as f64 / fft_size as f64
 }
 
 fn peak_from_complex32(values: &[Complex32]) -> (usize, f32) {

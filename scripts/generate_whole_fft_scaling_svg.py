@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the whole-file FFT scaling SVG and table rows.
 
-This script extrapolates execution time from the measured 1-hour benchmark
+This script extrapolates execution time from a simulated 1-hour 384 kHz anchor
 using the standard FFT-size growth model:
 
     T_hat(N) = T(N0) * (N log2 N) / (N0 log2 N0)
@@ -20,17 +20,17 @@ from xml.sax.saxutils import escape
 ROOT = Path(__file__).resolve().parent.parent
 SVG_PATH = ROOT / "benchmarks" / "whole_file_fft_scaling.svg"
 
-SAMPLE_RATE = 48_000
-ANCHOR_SAMPLES = 172_800_000
+SAMPLE_RATE = 384_000
+ANCHOR_SAMPLES = 1_382_400_000
 ANCHOR_DURATION_LABEL = "1 hr"
 
 ALGORITHMS = {
-    "PocketFFT": (1.214, "#1f77b4"),
-    "RealFFT": (2.311, "#2ca02c"),
-    "BlitzFFT exact-real": (2.508, "#d62728"),
-    "FFTW3f": (4.096, "#9467bd"),
-    "RustFFT complex": (4.379, "#ff7f0e"),
-    "KissFFT": (5.240, "#8c564b"),
+    "PocketFFT": (10.776736, "#1f77b4"),
+    "RealFFT": (20.514858, "#2ca02c"),
+    "BlitzFFT exact-real": (22.263636, "#d62728"),
+    "FFTW3f": (36.360388, "#9467bd"),
+    "RustFFT complex": (38.872592, "#ff7f0e"),
+    "KissFFT": (46.515731, "#8c564b"),
 }
 
 DURATIONS = [
@@ -68,7 +68,7 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     margin_left, margin_right, margin_top, margin_bottom = 110, 280, 88, 170
     plot_width = width - margin_left - margin_right
     plot_height = height - margin_top - margin_bottom
-    y_min, y_max = 0.01, 1000.0
+    y_min, y_max = 0.1, 10000.0
     log_min = math.log10(y_min)
     log_max = math.log10(y_max)
     anchor_index = next(
@@ -121,8 +121,8 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     add(
         "<desc id=\"desc\">Log-scale chart of estimated execution time for BlitzFFT "
         "exact-real, RealFFT, PocketFFT, FFTW3f, RustFFT complex, and KissFFT from "
-        "one minute to seventy-two hours at 48 kHz, extrapolated from the measured "
-        "one-hour benchmark using N log2 N scaling.</desc>"
+        "one minute to seventy-two hours at 384 kHz, extrapolated from a simulated "
+        "one-hour anchor using N log2 N scaling.</desc>"
     )
     add('<rect width="100%" height="100%" fill="#ffffff"/>')
     add(
@@ -133,10 +133,10 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     add(
         '<text x="110" y="60" font-family="Helvetica, Arial, sans-serif" '
         'font-size="17" fill="#4b5563">'
-        "48 kHz mono whole-file FFTs. Only the 1-hour point is measured; the rest use N log2 N scaling.</text>"
+        "384 kHz mono whole-file FFTs. The 1-hour anchor is simulated from the measured 48 kHz run; the rest use N log2 N scaling.</text>"
     )
 
-    for tick in [0.01, 0.1, 1, 10, 100, 1000]:
+    for tick in [0.1, 1, 10, 100, 1000, 10000]:
         y = y_pos(tick)
         add(
             f'<line x1="{margin_left}" y1="{y:.2f}" x2="{width - margin_right}" '
@@ -166,7 +166,7 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     add(
         f'<text x="{anchor_x + 10:.2f}" y="{margin_top + 18:.2f}" '
         'font-family="Helvetica, Arial, sans-serif" font-size="14" '
-        'font-weight="700" fill="#4b5563">Measured 1-hour anchor</text>'
+        'font-weight="700" fill="#4b5563">Simulated 1-hour anchor</text>'
     )
 
     for index, (label, seconds) in enumerate(DURATIONS):
@@ -191,7 +191,7 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     add(
         f'<text x="{margin_left + plot_width / 2:.2f}" y="{height - 28}" '
         'text-anchor="middle" font-family="Helvetica, Arial, sans-serif" '
-        'font-size="16" fill="#111827">Exact whole-file FFT size at 48 kHz</text>'
+        'font-size="16" fill="#111827">Exact whole-file FFT size at 384 kHz</text>'
     )
 
     end_labels: list[tuple[float, str, str, float]] = []
@@ -240,8 +240,8 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     callout_x = 110
     callout_y = 706
     callout_lines = [
-        "Samples at 48 kHz: 1 min = 2.88M, 1 hr = 172.8M, 24 hr = 4.147B, 72 hr = 12.442B",
-        f"Measured anchor point: {ANCHOR_DURATION_LABEL}, 172.8M samples",
+        "Samples at 384 kHz: 1 min = 23.04M, 1 hr = 1.382B, 24 hr = 33.178B, 72 hr = 99.533B",
+        f"Simulated anchor point: {ANCHOR_DURATION_LABEL}, 1.382B samples, derived from the measured 48 kHz benchmark",
         "Values away from that point are modeled estimates, not directly measured runs",
     ]
     add(

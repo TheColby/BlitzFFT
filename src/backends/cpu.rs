@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use realfft::{RealFftPlanner, RealToComplex};
 
 use super::{FftBackend, FftFrame};
+use crate::quad::Quad;
 
 type RealPlan = Arc<dyn RealToComplex<f32>>;
 type RealPlan64 = Arc<dyn RealToComplex<f64>>;
@@ -138,6 +139,94 @@ pub fn compute_batch_f64(frames: &[Vec<f64>], fft_size: usize) -> Result<Vec<Fft
                     frame_index: i,
                     magnitude,
                 })
+            })
+        })
+        .collect()
+}
+
+#[derive(Clone, Copy)]
+struct ComplexQuad {
+    re: Quad,
+    im: Quad,
+}
+
+impl ComplexQuad {
+    const fn new(re: Quad, im: Quad) -> Self {
+        Self { re, im }
+    }
+}
+
+fn quad_from_f64(value: f64) -> Quad {
+    Quad::from(value)
+}
+
+fn quad_to_f64(value: Quad) -> f64 {
+    value.to_f64()
+}
+
+fn bit_reverse(index: usize, bits: u32) -> usize {
+    index.reverse_bits() >> (usize::BITS - bits)
+}
+
+fn fft_real_qd(frame: &[Quad], fft_size: usize) -> Vec<Quad> {
+    let bits = fft_size.trailing_zeros();
+    let mut buffer = vec![ComplexQuad::new(Quad::ZERO, Quad::ZERO); fft_size];
+
+    for (index, &sample) in frame.iter().take(fft_size).enumerate() {
+        let reversed = bit_reverse(index, bits);
+        buffer[reversed] = ComplexQuad::new(sample, Quad::ZERO);
+    }
+
+    let mut step = 2usize;
+    while step <= fft_size {
+        let half_step = step / 2;
+        let angle = -2.0 * std::f64::consts::PI / step as f64;
+        let twiddle_step = ComplexQuad::new(quad_from_f64(angle.cos()), quad_from_f64(angle.sin()));
+
+        for start in (0..fft_size).step_by(step) {
+            let mut twiddle = ComplexQuad::new(Quad::ONE, Quad::ZERO);
+            for offset in 0..half_step {
+                let even = buffer[start + offset];
+                let odd = buffer[start + offset + half_step];
+                let product = ComplexQuad::new(
+                    twiddle.re * odd.re - twiddle.im * odd.im,
+                    twiddle.re * odd.im + twiddle.im * odd.re,
+                );
+
+                buffer[start + offset] =
+                    ComplexQuad::new(even.re + product.re, even.im + product.im);
+                buffer[start + offset + half_step] =
+                    ComplexQuad::new(even.re - product.re, even.im - product.im);
+
+                twiddle = ComplexQuad::new(
+                    twiddle.re * twiddle_step.re - twiddle.im * twiddle_step.im,
+                    twiddle.re * twiddle_step.im + twiddle.im * twiddle_step.re,
+                );
+            }
+        }
+
+        step *= 2;
+    }
+
+    buffer[..(fft_size / 2 + 1)]
+        .iter()
+        .map(|c| (c.re * c.re + c.im * c.im).sqrt())
+        .collect()
+}
+
+pub fn compute_batch_qd(frames: &[Vec<Quad>], fft_size: usize) -> Result<Vec<FftFrame>> {
+    frames
+        .par_iter()
+        .enumerate()
+        .map(|(i, frame)| {
+            let magnitude = fft_real_qd(frame, fft_size)
+                .into_iter()
+                .map(|value| quad_to_f64(value) as f32)
+                .collect();
+
+            Ok(FftFrame {
+                frame_index: i,
+                magnitude,
             })
         })
         .collect()

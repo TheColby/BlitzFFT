@@ -16,6 +16,7 @@ mod audio;
 mod backends;
 mod benchmark;
 mod output;
+mod quad;
 mod whole_fft;
 
 use std::{path::PathBuf, sync::Arc, time::Instant};
@@ -28,12 +29,13 @@ use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 
 use audio::{
-    apply_window_in_place, apply_window_in_place_f64, frame_signal, frame_signal_f64, load_wav,
-    window_coeffs, window_coeffs_f64, write_wav_f32, ChannelSelection, ProcessingPrecision,
-    WindowFunction,
+    apply_window_in_place, apply_window_in_place_f64, apply_window_in_place_qd, frame_signal,
+    frame_signal_f64, frame_signal_qd, load_wav, window_coeffs, window_coeffs_f64,
+    window_coeffs_qd, write_wav_f32, ChannelSelection, ProcessingPrecision, WindowFunction,
 };
 use backends::select_backend;
 use output::{print_summary, write_frames, OutputFormat};
+use quad::Quad;
 
 // ── CLI definition ────────────────────────────────────────────────────────────
 
@@ -164,11 +166,6 @@ fn main() -> Result<()> {
         .channel
         .parse()
         .map_err(|err: String| anyhow!("--channel: {err}"))?;
-    if args.precision == ProcessingPrecision::Bits128 {
-        return Err(anyhow!(
-            "128-bit internal processing is not available in this build; this build supports up to --precision 64"
-        ));
-    }
     if args.precision != ProcessingPrecision::Bits32
         && matches!(args.backend, BackendChoice::Cuda | BackendChoice::Metal)
     {
@@ -214,6 +211,11 @@ fn main() -> Result<()> {
     } else {
         None
     };
+    let mut mono128 = if args.precision == ProcessingPrecision::Bits128 {
+        Some(mono.iter().copied().map(|sample| Quad::from(sample as f64)).collect::<Vec<_>>())
+    } else {
+        None
+    };
 
     let full_window = if args.apply_full_hann {
         Some(WindowFunction::Hann)
@@ -223,7 +225,9 @@ fn main() -> Result<()> {
 
     if let Some(window) = full_window {
         eprintln!("  Applying full-signal {} window …", window);
-        if let Some(ref mut mono64) = mono64 {
+        if let Some(ref mut mono128) = mono128 {
+            apply_window_in_place_qd(mono128, window);
+        } else if let Some(ref mut mono64) = mono64 {
             apply_window_in_place_f64(mono64, window);
         } else {
             apply_window_in_place(&mut mono, window);
@@ -243,7 +247,11 @@ fn main() -> Result<()> {
             if args.bench_repeats == 1 { "" } else { "s" },
             args.precision
         );
-        let results = if let Some(ref mono64) = mono64 {
+        let results = if mono128.is_some() {
+            return Err(anyhow!(
+                "--whole-file-benchmark does not yet support --precision 128; 128-bit processing is currently available for framed CPU analysis only"
+            ));
+        } else if let Some(ref mono64) = mono64 {
             whole_fft::run_whole_signal_benchmark_f64(mono64, sample_rate, args.bench_repeats)?
         } else {
             whole_fft::run_whole_signal_benchmark(&mono, sample_rate, args.bench_repeats)?
@@ -286,13 +294,23 @@ fn main() -> Result<()> {
         BackendChoice::Metal => Some("metal"),
         BackendChoice::Cpu => Some("cpu"),
     };
-    if args.precision == ProcessingPrecision::Bits64 && args.benchmark {
+    if matches!(
+        args.precision,
+        ProcessingPrecision::Bits64 | ProcessingPrecision::Bits128
+    ) && args.benchmark
+    {
         return Err(anyhow!(
-            "--benchmark currently compares the selected backend against the f32 CPU baseline; use --precision 32 for backend-vs-backend benchmarking, or use normal analysis / --whole-file-benchmark for 64-bit processing"
+            "--benchmark currently compares the selected backend against the f32 CPU baseline; use --precision 32 for backend-vs-backend benchmarking, or use normal analysis for 64/128-bit CPU processing"
         ));
     }
-    let backend: Arc<dyn backends::FftBackend> = select_backend(force);
-    let backend_label = if args.precision == ProcessingPrecision::Bits64 {
+    let backend: Arc<dyn backends::FftBackend> = if args.precision == ProcessingPrecision::Bits32 {
+        select_backend(force)
+    } else {
+        select_backend(Some("cpu"))
+    };
+    let backend_label = if args.precision == ProcessingPrecision::Bits128 {
+        "Experimental radix-2 FFT (CPU - quad-double internal processing)".to_string()
+    } else if args.precision == ProcessingPrecision::Bits64 {
         "RealFFT (CPU - f64 internal processing)".to_string()
     } else {
         backend.name().to_string()
@@ -313,7 +331,26 @@ fn main() -> Result<()> {
     let flat_win = vec![1.0f32; args.fft_size]; // identity — GPU will window
     let gpu_applies_window = is_gpu && args.window == WindowFunction::Hann;
     let win_ref = if gpu_applies_window { &flat_win } else { &window };
-    let all_results = if let Some(ref mono64) = mono64 {
+    let all_results = if let Some(ref mono128) = mono128 {
+        let t_start = Instant::now();
+        let window128 = window_coeffs_qd(args.window, args.fft_size);
+        let frames128 = frame_signal_qd(mono128, args.fft_size, hop, &window128);
+        eprintln!(
+            "  Frames  : {}  (size={}, hop={}, window={})",
+            frames128.len(),
+            args.fft_size,
+            hop,
+            args.window
+        );
+        let all_results = backends::cpu::compute_batch_qd(&frames128, args.fft_size)?;
+        let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+        eprintln!(
+            "  Done    : {:.2} ms total  ({:.1} μs/frame)",
+            elapsed_ms,
+            elapsed_ms * 1000.0 / all_results.len() as f64,
+        );
+        all_results
+    } else if let Some(ref mono64) = mono64 {
         let t_start = Instant::now();
         let window64 = window_coeffs_f64(args.window, args.fft_size);
         let frames64 = frame_signal_f64(mono64, args.fft_size, hop, &window64);

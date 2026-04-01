@@ -1,42 +1,55 @@
-# 60-Minute Whole-File FFT Benchmark
+# 60-Minute Whole-File FFT Benchmark at 384 kHz
 
-Run date: `2026-04-01`
+Updated: `2026-04-01`
+
+Mode: `simulated from the measured 48 kHz benchmark anchor`
 
 Input:
 
-- File: `data/sine_440hz_60min_48khz_f32_hann.wav`
+- File: `data/sine_439p997hz_60min_384khz_f32_hann.wav`
 - Format: mono, 32-bit float WAV
-- Sample rate: `48,000 Hz`
+- Sample rate: `384,000 Hz`
 - Duration: `3,600 s`
-- Samples: `172,800,000`
+- Frequency: `439.997 Hz`
+- Samples: `1,382,400,000`
 - Window: full-signal Hann window applied before benchmarking
 
 Command:
 
 ```bash
 target/release/audiofft \
-  --generate-sine 440,48000,3600 \
+  --generate-sine 439.997,384000,3600 \
   --apply-full-hann \
-  --write-generated-wav data/sine_440hz_60min_48khz_f32_hann.wav \
+  --write-generated-wav data/sine_439p997hz_60min_384khz_f32_hann.wav \
   --whole-file-benchmark \
   --bench-repeats 1 \
   -f none
 ```
 
+Notes:
+
+- This one-hour `384` kHz exact whole-file FFT scenario is simulated from the measured `48` kHz benchmark anchor using the same $N \log_2 N$ scaling model used elsewhere in the docs.
+- A direct six-library exact rerun at `1,382,400,000` samples would require substantially more local memory and disk than is practical in this workspace.
+- The nearest FFT bin to `439.997 Hz` over a one-hour observation window is bin `1,583,989`, at
+
+$$
+\frac{1{,}583{,}989}{3600} \approx 439.996944444444 \text{ Hz}
+$$
+
 Results:
 
 | Algorithm | Setup (s) | Exec (s) | Peak bin | Peak freq (Hz) |
 |---|---:|---:|---:|---:|
-| PocketFFT | 0.036 | 1.214 | 1,584,000 | 440.000000 |
-| RealFFT | 0.591 | 2.311 | 1,584,000 | 440.000000 |
-| BlitzFFT exact-real | 0.910 | 2.508 | 1,584,000 | 440.000000 |
-| FFTW3f | 0.206 | 4.096 | 1,584,000 | 440.000000 |
-| RustFFT complex | 1.015 | 4.379 | 1,584,000 | 440.000000 |
-| KissFFT | 0.758 | 5.240 | 1,584,000 | 440.000000 |
+| PocketFFT | simulated | 10.776736 | 1,583,989 | 439.996944444444 |
+| RealFFT | simulated | 20.514858 | 1,583,989 | 439.996944444444 |
+| BlitzFFT exact-real | simulated | 22.263636 | 1,583,989 | 439.996944444444 |
+| FFTW3f | simulated | 36.360388 | 1,583,989 | 439.996944444444 |
+| RustFFT complex | simulated | 38.872592 | 1,583,989 | 439.996944444444 |
+| KissFFT | simulated | 46.515731 | 1,583,989 | 439.996944444444 |
 
 ## Tuning-Theory Aside
 
-The measured one-hour benchmark above is about exact FFT execution, not temperament theory, but the interval
+The one-hour benchmark above is about exact FFT execution, not temperament theory, but the interval
 
 $$
 \Delta = 0.0002777778
@@ -51,15 +64,15 @@ $$
 and
 
 $$
-1200 \cdot 0.0002777778 = 0.33333336 \text{ cents}
+1200 \cdot 0.0002777778 = 0.33333336 \, \text{¢}
 $$
 
-So the target is approximately `0.3333` cents, or a frequency ratio of `1.0001925`.
+A cent, written `¢`, is one hundredth of a semitone, or `1/1200` of an octave. So the target is approximately `0.3333 ¢`, or a frequency ratio of `1.0001925`.
 
 It is also exactly one step of `3600-EDO`, because
 
 $$
-\frac{1200}{3600} = \frac{1}{3} \text{ cent}
+\frac{1200}{3600} = \frac{1}{3} \, \text{¢}
 $$
 
 for each equal division of the octave.
@@ -67,36 +80,36 @@ for each equal division of the octave.
 That is smaller than the usual standard named commas. A practical nearby comparison is one sixth of a schisma:
 
 $$
-\text{schisma} \approx 1.95 \text{ cents}
+\text{schisma} \approx 1.95 \, \text{¢}
 $$
 
 $$
-\frac{1.95}{6} \approx 0.325 \text{ cents}
+\frac{1.95}{6} \approx 0.325 \, \text{¢}
 $$
 
 So
 
 $$
-\frac{1}{6}\text{ schisma} \approx 0.325 \text{ cents}
+\frac{1}{6}\text{ schisma} \approx 0.325 \, \text{¢}
 $$
 
-which is extremely close to `0.3333` cents, with an error of about `0.008` cents.
+which is extremely close to `0.3333 ¢`, with an error of about `0.008 ¢`.
 
 ## Estimated Scaling To Multi-Day FFTs
 
-The one-hour benchmark above is the measured anchor point:
+The one-hour benchmark above is the simulated anchor point:
 
 $$
-N_0 = 172{,}800{,}000
+N_0 = 1{,}382{,}400{,}000
 $$
 
-To estimate how the whole-file execution time grows for longer exact transforms, the chart below extrapolates the measured `Exec` times with the standard FFT-size model
+To estimate how the whole-file execution time grows for longer exact transforms, the chart below extrapolates the simulated `Exec` times with the standard FFT-size model
 
 $$
 \hat{T}(N) = T(N_0) \frac{N \log_2 N}{N_0 \log_2 N_0}
 $$
 
-This graph is intended as a planning aid, not as a claim that every duration shown was benchmarked directly. In particular, it does not try to capture host-memory limits, paging, NUMA effects, planner strategy changes, or other system effects that become more visible at very large sizes.
+This graph is intended as a planning aid, not as a claim that every duration shown was benchmarked directly. The one-hour `384` kHz anchor is itself simulated from the measured `48` kHz benchmark. In particular, it does not try to capture host-memory limits, paging, NUMA effects, planner strategy changes, or other system effects that become more visible at very large sizes.
 
 To regenerate the chart after updating the one-hour benchmark anchor, run:
 
@@ -110,6 +123,6 @@ Estimated execution times at the multi-day end of the curve:
 
 | Duration | Samples | PocketFFT | RealFFT | BlitzFFT exact-real | FFTW3f | RustFFT complex | KissFFT |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| 24 hr | 4,147,200,000 | 34.018 s | 64.757 s | 70.277 s | 114.775 s | 122.705 s | 146.831 s |
-| 48 hr | 8,294,400,000 | 70.165 s | 133.568 s | 144.954 s | 236.735 s | 253.091 s | 302.854 s |
-| 72 hr | 12,441,600,000 | 107.116 s | 203.909 s | 221.291 s | 361.406 s | 386.377 s | 462.346 s |
+| 24 hr | 33,177,600,000 | 297.696 s | 566.701 s | 615.009 s | 1004.417 s | 1073.814 s | 1284.948 s |
+| 48 hr | 66,355,200,000 | 612.428 s | 1165.832 s | 1265.213 s | 2066.312 s | 2209.077 s | 2643.427 s |
+| 72 hr | 99,532,800,000 | 933.589 s | 1777.203 s | 1928.700 s | 3149.902 s | 3367.535 s | 4029.660 s |

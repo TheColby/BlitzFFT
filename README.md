@@ -1,6 +1,6 @@
 # BlitzFFT
 
-`BlitzFFT` is a Rust CLI for audio Fourier analysis and exact whole-signal FFT benchmarking, with `64-bit` internal CPU processing support and an explicit `128-bit` unsupported mode.
+`BlitzFFT` is a Rust CLI for audio Fourier analysis and exact whole-signal FFT benchmarking, with `64-bit` CPU processing and an experimental `128-bit` software quad CPU mode for framed analysis.
 It has two complementary jobs:
 
 - framed analysis, similar to an STFT pipeline, with backend auto-selection `CUDA -> Metal -> CPU`
@@ -28,8 +28,8 @@ This repository is partly a tool and partly a notebook on FFT implementation tra
 - [CLI](#cli)
 - [Examples](#examples)
 - [Whole-file benchmark methodology](#whole-file-benchmark-methodology)
-- [Measured 60-minute whole-file FFT](#measured-60-minute-whole-file-fft)
-- [Estimated scaling to multi-day FFTs](#estimated-scaling-to-multi-day-ffts)
+- [Simulated 60-minute whole-file FFT at 384 kHz](#simulated-60-minute-whole-file-fft-at-384-khz)
+- [Estimated scaling to multi-day FFTs at 384 kHz](#estimated-scaling-to-multi-day-ffts-at-384-khz)
 - [Repository layout](#repository-layout)
 - [Reference map](#reference-map)
 - [License](#license)
@@ -60,8 +60,7 @@ The whole-file path is different. It treats the entire waveform as one signal an
 - Framed results no longer allocate an unused full complex spectrum for each frame.
 - The repo now has an exact whole-file benchmark path for long real-valued signals, including non-power-of-two lengths.
 - The benchmark harness compares six paths side by side: `BlitzFFT exact-real`, `RealFFT`, `RustFFT complex`, `FFTW3f`, `KissFFT`, and `PocketFFT`.
-- The repo includes a generated one-hour test asset with a full-signal Hann window:
-  `data/sine_440hz_60min_48khz_f32_hann.wav`
+- The benchmark docs now center a simulated one-hour `384` kHz scenario using a `439.997` Hz sine and a full-signal Hann window.
 
 ## What an FFT is
 
@@ -221,7 +220,7 @@ This is not an STFT. There is no hop size and no time-local frame index. You get
 That is why the reported frequency resolution for the one-hour example is
 
 $$
-\Delta f = \frac{48000}{172800000} = \frac{1}{3600} \approx 0.0002777778 \text{ Hz}
+\Delta f = \frac{384000}{1382400000} = \frac{1}{3600} \approx 0.0002777778 \text{ Hz}
 $$
 
 This mode exists to compare transform engines and data-motion costs, not to provide time-local spectral evolution.
@@ -240,21 +239,21 @@ $$
 \text{ratio} = 2^{0.0002777778} \approx 1.0001925
 $$
 
-and the equivalent size in cents is
+A cent, written `¢`, is one hundredth of a semitone, or `1/1200` of an octave. The equivalent size here is
 
 $$
-1200 \cdot 0.0002777778 = 0.33333336 \text{ cents}
+1200 \cdot 0.0002777778 = 0.33333336 \, \text{¢}
 $$
 
 So that target interval is approximately:
 
-- `0.3333` cents
+- `0.3333 ¢`
 - `1.0001925` as a frequency ratio
 
 It is also exactly one step of `3600-EDO`, since
 
 $$
-\frac{1200}{3600} = \frac{1}{3} \text{ cent}
+\frac{1200}{3600} = \frac{1}{3} \, \text{¢}
 $$
 
 per equal division of the octave.
@@ -262,22 +261,22 @@ per equal division of the octave.
 This is smaller than the usual named commas in tuning theory. A useful nearby reference is one sixth of a schisma. Using
 
 $$
-\text{schisma} \approx 1.95 \text{ cents}
+\text{schisma} \approx 1.95 \, \text{¢}
 $$
 
 gives
 
 $$
-\frac{1.95}{6} \approx 0.325 \text{ cents}
+\frac{1.95}{6} \approx 0.325 \, \text{¢}
 $$
 
 so
 
 $$
-\frac{1}{6}\text{ schisma} \approx 0.325 \text{ cents}
+\frac{1}{6}\text{ schisma} \approx 0.325 \, \text{¢}
 $$
 
-which is very close to `0.3333` cents, with an error of about `0.008` cents.
+which is very close to `0.3333 ¢`, with an error of about `0.008 ¢`.
 
 ## Project architecture
 
@@ -398,7 +397,8 @@ Options:
 - `--min-hz` and `--max-hz` limit emitted `text`, `csv`, and `json` bins plus summary peaks to a frequency band.
 - `--window` controls framed analysis windows, while `--full-window` applies a whole-signal window before an exact whole-file FFT.
 - `--precision 64` enables double-precision CPU processing for framed analysis and a reduced whole-file benchmark set.
-- `--precision 128` is exposed as an explicit CLI mode, but currently returns a clear unsupported error instead of silently falling back.
+- `--precision 128` enables an experimental software quad-double CPU path for framed analysis.
+- `--precision 128` currently does not support `--whole-file-benchmark`, and it does not use GPU backends.
 - Whole-file benchmark mode prints a comparison table and exits.
 
 ## Examples
@@ -419,6 +419,12 @@ cargo run --release -- input.wav --channel left --min-hz 80 --max-hz 5000 --summ
 
 ```bash
 cargo run --release -- input.wav --precision 64 --backend cpu --summary -f none
+```
+
+### Run framed analysis in experimental 128-bit software precision
+
+```bash
+cargo run --release -- input.wav --precision 128 --backend cpu --summary -f none
 ```
 
 ### Framed benchmark against the CPU baseline
@@ -443,9 +449,9 @@ cargo run --release -- input.wav --precision 64 --backend cpu --full-window hann
 
 ```bash
 target/release/audiofft \
-  --generate-sine 440,48000,3600 \
+  --generate-sine 439.997,384000,3600 \
   --apply-full-hann \
-  --write-generated-wav data/sine_440hz_60min_48khz_f32_hann.wav \
+  --write-generated-wav data/sine_439p997hz_60min_384khz_f32_hann.wav \
   --whole-file-benchmark \
   --bench-repeats 1 \
   -f none
@@ -508,54 +514,60 @@ $$
 
 applied for $0 \le n < N$ across the entire loaded or synthesized waveform.
 
-## Measured 60-minute whole-file FFT
+## Simulated 60-minute whole-file FFT at 384 kHz
 
-Measured on `2026-04-01` in this repo after generating a mono $48$ kHz, 32-bit float WAV with:
+Updated on `2026-04-01` for a mono $384$ kHz, `32-bit` float, one-hour sine-wave scenario with:
 
-- frequency: `440 Hz`
+- frequency: `439.997 Hz`
 - duration: `3600 s`
-- samples: `172,800,000`
+- samples: `1,382,400,000`
 - frequency resolution:
 
 $$
-\Delta f = \frac{48000}{172800000} = \frac{1}{3600} \approx 0.0002777778 \text{ Hz}
+\Delta f = \frac{384000}{1382400000} = \frac{1}{3600} \approx 0.0002777778 \text{ Hz}
+$$
+
+- nearest-bin frequency to the target sine:
+
+$$
+f_{\text{peak}} = \frac{1{,}583{,}989}{3600} \approx 439.996944444444 \text{ Hz}
 $$
 
 - window: full-signal Hann window applied before the FFT
 - command: the reproduction command shown above
 
-The generated asset on disk is about `659 MiB`.
+The corresponding WAV would be about `5.15 GiB` on disk. In this workspace, the one-hour `384` kHz benchmark is treated as a simulation anchored to the measured `48` kHz run, because a direct six-library exact rerun at `1.3824` billion samples would exceed practical local memory and disk limits.
 
-The table below reports one exact forward FFT over the full signal. `Setup` includes planner or config creation. `Exec` is the measured transform run, excluding WAV load time but including any algorithm-specific input marshaling from the real sample buffer.
+The table below therefore reports a simulated one-hour anchor. `Exec` is projected with the same $N \log_2 N$ model used in the scaling graph. `Peak freq (Hz)` is shown at much higher precision so the off-bin `439.997` Hz target is visible.
 
 | Algorithm | Setup (s) | Exec (s) | Peak bin | Peak freq (Hz) |
 |---|---:|---:|---:|---:|
-| PocketFFT | 0.036 | 1.214 | 1,584,000 | 440.000000 |
-| RealFFT | 0.591 | 2.311 | 1,584,000 | 440.000000 |
-| BlitzFFT exact-real | 0.910 | 2.508 | 1,584,000 | 440.000000 |
-| FFTW3f | 0.206 | 4.096 | 1,584,000 | 440.000000 |
-| RustFFT complex | 1.015 | 4.379 | 1,584,000 | 440.000000 |
-| KissFFT | 0.758 | 5.240 | 1,584,000 | 440.000000 |
+| PocketFFT | simulated | 10.776736 | 1,583,989 | 439.996944444444 |
+| RealFFT | simulated | 20.514858 | 1,583,989 | 439.996944444444 |
+| BlitzFFT exact-real | simulated | 22.263636 | 1,583,989 | 439.996944444444 |
+| FFTW3f | simulated | 36.360388 | 1,583,989 | 439.996944444444 |
+| RustFFT complex | simulated | 38.872592 | 1,583,989 | 439.996944444444 |
+| KissFFT | simulated | 46.515731 | 1,583,989 | 439.996944444444 |
 
 The same numbers are also recorded in [`benchmarks/60min_whole_file_fft.md`](benchmarks/60min_whole_file_fft.md).
 
-## Estimated scaling to multi-day FFTs
+## Estimated scaling to multi-day FFTs at 384 kHz
 
-The measured table above gives one exact anchor point at
+The simulated table above gives one exact-size anchor point at
 
 $$
-N_0 = 172{,}800{,}000
+N_0 = 1{,}382{,}400{,}000
 $$
 
-samples, or one hour of mono audio at $48$ kHz.
+samples, or one hour of mono audio at $384$ kHz.
 
-To visualize how the whole-file execution time should grow as the FFT gets longer, the graph below extrapolates each algorithm's measured `Exec` time with an $N \log_2 N$ model:
+To visualize how the whole-file execution time should grow as the FFT gets longer, the graph below extrapolates each algorithm's simulated `Exec` time with an $N \log_2 N$ model:
 
 $$
 \hat{T}(N) = T(N_0) \frac{N \log_2 N}{N_0 \log_2 N_0}
 $$
 
-This is an **execution-time scaling estimate**, not a fresh measured benchmark at every duration. It does not try to model planner heuristics, cache cliffs, allocator behavior, out-of-core I/O, or OS-level memory pressure for truly enormous transforms.
+This is an **execution-time scaling estimate**, not a fresh measured benchmark at every duration. The one-hour `384` kHz anchor is itself simulated from the measured `48` kHz benchmark by the same $N \log_2 N$ model. It does not try to model planner heuristics, cache cliffs, allocator behavior, out-of-core I/O, or OS-level memory pressure for truly enormous transforms.
 
 To regenerate the chart after updating the anchor timings, run:
 
@@ -565,20 +577,20 @@ python3 scripts/generate_whole_fft_scaling_svg.py
 
 ![Estimated whole-file FFT execution time scaling](benchmarks/whole_file_fft_scaling.svg)
 
-At the multi-day end of that estimate, the projected execution times at $48$ kHz are:
+At the multi-day end of that estimate, the projected execution times at $384$ kHz are:
 
 | Duration | Samples | PocketFFT | RealFFT | BlitzFFT exact-real | FFTW3f | RustFFT complex | KissFFT |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| 24 hr | 4,147,200,000 | 34.018 s | 64.757 s | 70.277 s | 114.775 s | 122.705 s | 146.831 s |
-| 48 hr | 8,294,400,000 | 70.165 s | 133.568 s | 144.954 s | 236.735 s | 253.091 s | 302.854 s |
-| 72 hr | 12,441,600,000 | 107.116 s | 203.909 s | 221.291 s | 361.406 s | 386.377 s | 462.346 s |
+| 24 hr | 33,177,600,000 | 297.696 s | 566.701 s | 615.009 s | 1004.417 s | 1073.814 s | 1284.948 s |
+| 48 hr | 66,355,200,000 | 612.428 s | 1165.832 s | 1265.213 s | 2066.312 s | 2209.077 s | 2643.427 s |
+| 72 hr | 99,532,800,000 | 933.589 s | 1777.203 s | 1928.700 s | 3149.902 s | 3367.535 s | 4029.660 s |
 
 ## Repository layout
 
 ```text
 BlitzFFT/
 |- data/
-|  `- sine_440hz_60min_48khz_f32_hann.wav
+|  `- generated benchmark WAVs (for example, a 384 kHz 60-minute sine asset; not checked in)
 |- src/
 |  |- main.rs
 |  |- audio.rs

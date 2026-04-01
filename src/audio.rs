@@ -13,6 +13,8 @@ use rayon::prelude::*;
 use rustfft::num_traits::Float;
 use std::{fmt, path::Path, str::FromStr};
 
+use crate::quad::Quad;
+
 /// Raw audio metadata
 #[derive(Debug, Clone)]
 pub struct AudioInfo {
@@ -211,6 +213,31 @@ pub fn window_coeffs_f64(window: WindowFunction, size: usize) -> Vec<f64> {
     window_coeffs_generic(window, size)
 }
 
+pub fn window_coeffs_qd(window: WindowFunction, size: usize) -> Vec<Quad> {
+    use std::f64::consts::PI;
+
+    if size <= 1 {
+        return vec![Quad::ONE; size];
+    }
+
+    let cast = |v: f64| Quad::from(v);
+    match window {
+        WindowFunction::Rect => vec![Quad::ONE; size],
+        WindowFunction::Hann => (0..size)
+            .map(|n| cast(0.5 * (1.0 - (2.0 * PI * n as f64 / (size - 1) as f64).cos())))
+            .collect(),
+        WindowFunction::Hamming => (0..size)
+            .map(|n| cast(0.54 - 0.46 * (2.0 * PI * n as f64 / (size - 1) as f64).cos()))
+            .collect(),
+        WindowFunction::Blackman => (0..size)
+            .map(|n| {
+                let phase = 2.0 * PI * n as f64 / (size - 1) as f64;
+                cast(0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos())
+            })
+            .collect(),
+    }
+}
+
 fn window_coeffs_generic<T: Float>(window: WindowFunction, size: usize) -> Vec<T> {
     use std::f64::consts::PI;
 
@@ -242,6 +269,17 @@ pub fn apply_window_in_place(signal: &mut [f32], window: WindowFunction) {
 
 pub fn apply_window_in_place_f64(signal: &mut [f64], window: WindowFunction) {
     apply_window_in_place_generic(signal, window);
+}
+
+pub fn apply_window_in_place_qd(signal: &mut [Quad], window: WindowFunction) {
+    if signal.len() <= 1 || window == WindowFunction::Rect {
+        return;
+    }
+
+    let coeffs = window_coeffs_qd(window, signal.len());
+    for (sample, coeff) in signal.iter_mut().zip(coeffs.into_iter()) {
+        *sample *= coeff;
+    }
 }
 
 fn apply_window_in_place_generic<T>(signal: &mut [T], window: WindowFunction)
@@ -301,6 +339,34 @@ pub fn frame_signal_f64<'a>(
     window: &[f64],
 ) -> Vec<Vec<f64>> {
     frame_signal_generic(signal, fft_size, hop, window)
+}
+
+pub fn frame_signal_qd(signal: &[Quad], fft_size: usize, hop: usize, window: &[Quad]) -> Vec<Vec<Quad>> {
+    if signal.is_empty() || hop == 0 {
+        return vec![];
+    }
+
+    let frame_count = if signal.len() <= fft_size {
+        1
+    } else {
+        1 + (signal.len() - 1) / hop
+    };
+    let mut frames = Vec::with_capacity(frame_count);
+    let mut offset = 0usize;
+
+    while offset < signal.len() {
+        let end = (offset + fft_size).min(signal.len());
+        let src = &signal[offset..end];
+
+        let mut frame = vec![Quad::ZERO; fft_size];
+        for (i, &sample) in src.iter().enumerate() {
+            frame[i] = sample * window[i];
+        }
+        frames.push(frame);
+        offset += hop;
+    }
+
+    frames
 }
 
 fn frame_signal_generic<T>(signal: &[T], fft_size: usize, hop: usize, window: &[T]) -> Vec<Vec<T>>
