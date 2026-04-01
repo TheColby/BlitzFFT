@@ -3,13 +3,14 @@
 // WAV loading and framing utilities.
 //
 // Supports: 16-bit PCM, 24-bit PCM, 32-bit float.
-// Stereo → mono by averaging channels.
+// Multi-channel input can be downmixed or a single channel can be selected.
 // Frames are extracted with a configurable hop size (default = fft_size/2).
 
 use anyhow::{anyhow, Context, Result};
+use clap::ValueEnum;
 use hound::{SampleFormat, WavReader};
 use rayon::prelude::*;
-use std::path::Path;
+use std::{fmt, path::Path, str::FromStr};
 
 /// Raw audio metadata
 #[derive(Debug, Clone)]
@@ -20,8 +21,64 @@ pub struct AudioInfo {
     pub duration_secs: f64,
 }
 
-/// Load a WAV file, downmix to mono, normalise to [-1, 1].
-pub fn load_wav(path: &Path) -> Result<(Vec<f32>, AudioInfo)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelSelection {
+    Average,
+    Left,
+    Right,
+    Index(usize),
+}
+
+impl fmt::Display for ChannelSelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Average => write!(f, "avg"),
+            Self::Left => write!(f, "left"),
+            Self::Right => write!(f, "right"),
+            Self::Index(index) => write!(f, "{index}"),
+        }
+    }
+}
+
+impl FromStr for ChannelSelection {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        let normalized = value.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "avg" | "average" | "mono" | "mix" => Ok(Self::Average),
+            "left" | "l" => Ok(Self::Left),
+            "right" | "r" => Ok(Self::Right),
+            _ => normalized
+                .parse::<usize>()
+                .map(Self::Index)
+                .map_err(|_| format!("invalid channel selection '{value}'")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum WindowFunction {
+    Rect,
+    Hann,
+    Hamming,
+    Blackman,
+}
+
+impl fmt::Display for WindowFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::Rect => "rect",
+            Self::Hann => "hann",
+            Self::Hamming => "hamming",
+            Self::Blackman => "blackman",
+        };
+        write!(f, "{label}")
+    }
+}
+
+/// Load a WAV file, select/downmix channels, normalise to [-1, 1].
+pub fn load_wav(path: &Path, channel_selection: ChannelSelection) -> Result<(Vec<f32>, AudioInfo)> {
     let mut reader = WavReader::open(path).with_context(|| format!("Cannot open {:?}", path))?;
 
     let spec = reader.spec();
@@ -29,58 +86,26 @@ pub fn load_wav(path: &Path) -> Result<(Vec<f32>, AudioInfo)> {
 
     let mono: Vec<f32> = match (spec.sample_format, spec.bits_per_sample) {
         (SampleFormat::Float, 32) => {
-            if channels == 1 {
-                reader
-                    .samples::<f32>()
-                    .map(|s| s.context("Invalid f32 WAV sample"))
-                    .collect::<Result<Vec<_>>>()?
-            } else {
-                downmix_samples(reader.samples::<f32>(), channels, |s| s)
-            }
+            collect_channel_samples(reader.samples::<f32>(), channels, channel_selection, |s| s)?
         }
-        (SampleFormat::Int, 16) => {
-            if channels == 1 {
-                reader
-                    .samples::<i16>()
-                    .map(|s| {
-                        s.map(|v| v as f32 / 32768.0)
-                            .context("Invalid i16 WAV sample")
-                    })
-                    .collect::<Result<Vec<_>>>()?
-            } else {
-                downmix_samples(reader.samples::<i16>(), channels, |s| s as f32 / 32768.0)
-            }
-        }
-        (SampleFormat::Int, 24) => {
-            if channels == 1 {
-                reader
-                    .samples::<i32>()
-                    .map(|s| {
-                        s.map(|v| v as f32 / 8_388_608.0)
-                            .context("Invalid 24-bit WAV sample")
-                    })
-                    .collect::<Result<Vec<_>>>()?
-            } else {
-                downmix_samples(reader.samples::<i32>(), channels, |s| {
-                    s as f32 / 8_388_608.0
-                })
-            }
-        }
-        (SampleFormat::Int, 32) => {
-            if channels == 1 {
-                reader
-                    .samples::<i32>()
-                    .map(|s| {
-                        s.map(|v| v as f32 / 2_147_483_648.0)
-                            .context("Invalid i32 WAV sample")
-                    })
-                    .collect::<Result<Vec<_>>>()?
-            } else {
-                downmix_samples(reader.samples::<i32>(), channels, |s| {
-                    s as f32 / 2_147_483_648.0
-                })
-            }
-        }
+        (SampleFormat::Int, 16) => collect_channel_samples(
+            reader.samples::<i16>(),
+            channels,
+            channel_selection,
+            |s| s as f32 / 32768.0,
+        )?,
+        (SampleFormat::Int, 24) => collect_channel_samples(
+            reader.samples::<i32>(),
+            channels,
+            channel_selection,
+            |s| s as f32 / 8_388_608.0,
+        )?,
+        (SampleFormat::Int, 32) => collect_channel_samples(
+            reader.samples::<i32>(),
+            channels,
+            channel_selection,
+            |s| s as f32 / 2_147_483_648.0,
+        )?,
         (fmt, bits) => return Err(anyhow!("Unsupported WAV format: {:?} {}-bit", fmt, bits)),
     };
 
@@ -98,49 +123,102 @@ pub fn load_wav(path: &Path) -> Result<(Vec<f32>, AudioInfo)> {
     Ok((mono, info))
 }
 
-fn downmix_samples<T, I, F>(iter: I, channels: usize, map_sample: F) -> Vec<f32>
+fn collect_channel_samples<T, I, F>(
+    iter: I,
+    channels: usize,
+    selection: ChannelSelection,
+    map_sample: F,
+) -> Result<Vec<f32>>
 where
     I: IntoIterator<Item = std::result::Result<T, hound::Error>>,
     F: Fn(T) -> f32,
 {
+    let selected_channel = match selection {
+        ChannelSelection::Average => None,
+        ChannelSelection::Left => Some(0),
+        ChannelSelection::Right => Some(1),
+        ChannelSelection::Index(index) => Some(index),
+    };
+    if let Some(index) = selected_channel {
+        if index >= channels {
+            return Err(anyhow!(
+                "Requested channel {} but WAV only has {} channel{}",
+                index,
+                channels,
+                if channels == 1 { "" } else { "s" }
+            ));
+        }
+    }
+
     let mut mono = Vec::new();
     let mut sum = 0.0f32;
+    let mut selected_value = 0.0f32;
     let mut channel_index = 0usize;
 
     for sample in iter {
-        let sample = map_sample(sample.expect("Invalid WAV sample"));
-        sum += sample;
+        let sample = map_sample(sample.context("Invalid WAV sample")?);
+        if let Some(index) = selected_channel {
+            if channel_index == index {
+                selected_value = sample;
+            }
+        } else {
+            sum += sample;
+        }
         channel_index += 1;
 
         if channel_index == channels {
-            mono.push(sum / channels as f32);
+            mono.push(if selected_channel.is_some() {
+                selected_value
+            } else {
+                sum / channels as f32
+            });
             sum = 0.0;
+            selected_value = 0.0;
             channel_index = 0;
         }
     }
 
-    mono
+    Ok(mono)
 }
 
-/// Von Hann window coefficients for FFT frame apodisation.
-pub fn hann_window(size: usize) -> Vec<f32> {
+pub fn window_coeffs(window: WindowFunction, size: usize) -> Vec<f32> {
     use std::f64::consts::PI;
-    (0..size)
-        .map(|n| (0.5 * (1.0 - (2.0 * PI * n as f64 / (size - 1) as f64).cos())) as f32)
-        .collect()
+
+    if size <= 1 {
+        return vec![1.0; size];
+    }
+
+    match window {
+        WindowFunction::Rect => vec![1.0; size],
+        WindowFunction::Hann => (0..size)
+            .map(|n| (0.5 * (1.0 - (2.0 * PI * n as f64 / (size - 1) as f64).cos())) as f32)
+            .collect(),
+        WindowFunction::Hamming => (0..size)
+            .map(|n| (0.54 - 0.46 * (2.0 * PI * n as f64 / (size - 1) as f64).cos()) as f32)
+            .collect(),
+        WindowFunction::Blackman => (0..size)
+            .map(|n| {
+                let phase = 2.0 * PI * n as f64 / (size - 1) as f64;
+                (0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos()) as f32
+            })
+            .collect(),
+    }
 }
 
-pub fn apply_hann_window_in_place(signal: &mut [f32]) {
+pub fn apply_window_in_place(signal: &mut [f32], window: WindowFunction) {
     if signal.len() <= 1 {
         return;
     }
 
-    let denom = (signal.len() - 1) as f32;
-    signal.par_iter_mut().enumerate().for_each(|(i, sample)| {
-        let phase = 2.0 * std::f32::consts::PI * i as f32 / denom;
-        let coeff = 0.5 * (1.0 - phase.cos());
-        *sample *= coeff;
-    });
+    if window == WindowFunction::Rect {
+        return;
+    }
+
+    let coeffs = window_coeffs(window, signal.len());
+    signal
+        .par_iter_mut()
+        .zip(coeffs.into_par_iter())
+        .for_each(|(sample, coeff)| *sample *= coeff);
 }
 
 pub fn write_wav_f32(path: &Path, samples: &[f32], sample_rate: u32) -> Result<()> {

@@ -27,7 +27,10 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use rayon::prelude::*;
 
-use audio::{apply_hann_window_in_place, frame_signal, hann_window, load_wav, write_wav_f32};
+use audio::{
+    apply_window_in_place, frame_signal, load_wav, window_coeffs, write_wav_f32,
+    ChannelSelection, WindowFunction,
+};
 use backends::select_backend;
 use output::{print_summary, write_frames, OutputFormat};
 
@@ -69,6 +72,14 @@ struct Args {
     #[arg(short, long, value_enum, default_value = "auto")]
     backend: BackendChoice,
 
+    /// Input channel selection: avg, left, right, or zero-based channel index
+    #[arg(long, default_value = "avg", value_name = "avg|left|right|N")]
+    channel: String,
+
+    /// Window applied to each analysis frame
+    #[arg(long, value_enum, default_value = "hann")]
+    window: WindowFunction,
+
     /// Output file (optional; stdout if omitted for text/csv)
     #[arg(short, long, value_name = "PATH")]
     output: Option<PathBuf>,
@@ -102,13 +113,25 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     write_generated_wav: Option<PathBuf>,
 
+    /// Apply a window across the entire loaded/generated signal before whole-file FFT
+    #[arg(long, value_enum)]
+    full_window: Option<WindowFunction>,
+
     /// Apply a Hann window across the entire loaded/generated signal
-    #[arg(long)]
+    #[arg(long, conflicts_with = "full_window")]
     apply_full_hann: bool,
 
     /// Print per-frame peak-frequency summary to stdout
     #[arg(long)]
     summary: bool,
+
+    /// Only emit bins at or above this frequency
+    #[arg(long)]
+    min_hz: Option<f32>,
+
+    /// Only emit bins at or below this frequency
+    #[arg(long)]
+    max_hz: Option<f32>,
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -132,6 +155,10 @@ fn synthesise_sine(freq: f32, sample_rate: u32, duration_secs: f32) -> (Vec<f32>
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    let channel_selection: ChannelSelection = args
+        .channel
+        .parse()
+        .map_err(|err: String| anyhow!("--channel: {err}"))?;
 
     // ── Load or synthesise audio ───────────────────────────────────────────
     let (mut mono, sample_rate) = if let Some(ref spec) = args.generate_sine {
@@ -152,7 +179,7 @@ fn main() -> Result<()> {
             .input
             .as_ref()
             .ok_or_else(|| anyhow!("Provide an INPUT file or use --generate-sine"))?;
-        let (samples, info) = load_wav(input)?;
+        let (samples, info) = load_wav(input, channel_selection)?;
         eprintln!(
             "  Loaded {:?}  {:.3}s  {} Hz  {} ch",
             input.file_name().unwrap_or_default(),
@@ -161,12 +188,19 @@ fn main() -> Result<()> {
             info.channels,
         );
         eprintln!("  Samples : {}", info.num_samples);
+        eprintln!("  Channel : {}", channel_selection);
         (samples, info.sample_rate)
     };
 
-    if args.apply_full_hann {
-        eprintln!("  Applying full-signal Hann window …");
-        apply_hann_window_in_place(&mut mono);
+    let full_window = if args.apply_full_hann {
+        Some(WindowFunction::Hann)
+    } else {
+        args.full_window
+    };
+
+    if let Some(window) = full_window {
+        eprintln!("  Applying full-signal {} window …", window);
+        apply_window_in_place(&mut mono, window);
     }
 
     if let Some(path) = args.write_generated_wav.as_deref() {
@@ -198,6 +232,21 @@ fn main() -> Result<()> {
     if hop == 0 {
         return Err(anyhow!("--hop must be greater than zero"));
     }
+    if let Some(min_hz) = args.min_hz {
+        if min_hz < 0.0 {
+            return Err(anyhow!("--min-hz must be non-negative"));
+        }
+    }
+    if let Some(max_hz) = args.max_hz {
+        if max_hz < 0.0 {
+            return Err(anyhow!("--max-hz must be non-negative"));
+        }
+    }
+    if let (Some(min_hz), Some(max_hz)) = (args.min_hz, args.max_hz) {
+        if min_hz > max_hz {
+            return Err(anyhow!("--min-hz must be less than or equal to --max-hz"));
+        }
+    }
 
     // ── Build backend ──────────────────────────────────────────────────────
     let force = match args.backend {
@@ -210,19 +259,21 @@ fn main() -> Result<()> {
     eprintln!("  Backend : {}", backend.name().green().bold());
 
     // ── Frame the signal ───────────────────────────────────────────────────
-    // GPU backends (CUDA v2, Metal v2) apply the Hann window on-device.
-    // For the CPU backend we apply it here on the host.
+    // GPU backends apply the standard Hann window on-device.
+    // For other windows we apply coefficients on the host before upload.
     let is_gpu = !matches!(force, Some("cpu")) && backend.name().contains("GPU")
         || backend.name().contains("CUDA");
-    let window = hann_window(args.fft_size);
+    let window = window_coeffs(args.window, args.fft_size);
     let flat_win = vec![1.0f32; args.fft_size]; // identity — GPU will window
-    let win_ref = if is_gpu { &flat_win } else { &window };
+    let gpu_applies_window = is_gpu && args.window == WindowFunction::Hann;
+    let win_ref = if gpu_applies_window { &flat_win } else { &window };
     let frames = frame_signal(&mono, args.fft_size, hop, win_ref);
     eprintln!(
-        "  Frames  : {}  (size={}, hop={})",
+        "  Frames  : {}  (size={}, hop={}, window={})",
         frames.len(),
         args.fft_size,
-        hop
+        hop,
+        args.window
     );
 
     // ── Benchmark mode ────────────────────────────────────────────────────
@@ -275,7 +326,13 @@ fn main() -> Result<()> {
         println!();
         println!("{}", "  Frame   Peak Freq     Magnitude".dimmed());
         println!("{}", "  ──────────────────────────────".dimmed());
-        print_summary(&all_results, args.fft_size, sample_rate);
+        print_summary(
+            &all_results,
+            args.fft_size,
+            sample_rate,
+            args.min_hz,
+            args.max_hz,
+        );
         println!();
     }
 
@@ -287,6 +344,8 @@ fn main() -> Result<()> {
         args.format,
         args.output.as_deref(),
         args.top_bins,
+        args.min_hz,
+        args.max_hz,
     )?;
 
     Ok(())

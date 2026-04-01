@@ -316,14 +316,19 @@ Options:
       --hop <HOP>                      Hop size in samples (default = fft_size/2)
       --batch-size <BATCH_SIZE>        Number of frames to process per GPU batch (default = all frames) [default: 0]
   -b, --backend <BACKEND>              Force a specific backend [default: auto]
+      --channel <avg|left|right|N>     Input channel selection [default: avg]
+      --window <WINDOW>                Window applied to each analysis frame [default: hann] [possible values: rect, hann, hamming, blackman]
   -o, --output <PATH>                  Output file (optional; stdout if omitted for text/csv)
   -f, --format <FORMAT>                Output format [default: text]
+      --min-hz <MIN_HZ>                Only emit bins at or above this frequency
+      --max-hz <MAX_HZ>                Only emit bins at or below this frequency
       --top-bins <TOP_BINS>            Only emit the N loudest bins per frame (0 = all bins) [default: 0]
       --benchmark                      Run framed benchmark comparing selected backend against CPU baseline
       --bench-repeats <BENCH_REPEATS>  Number of benchmark repeats [default: 5]
       --whole-file-benchmark           Run one exact FFT over the entire signal
       --generate-sine <Hz,SR,Secs>     Synthesize a sine wave in memory
       --write-generated-wav <PATH>     Persist the generated/loaded mono signal as 32-bit float WAV
+      --full-window <FULL_WINDOW>      Apply a window across the entire loaded/generated signal before whole-file FFT
       --apply-full-hann                Apply a Hann window across the entire loaded/generated signal
       --summary                        Print per-frame peak-frequency summary to stdout
 ```
@@ -331,8 +336,10 @@ Options:
 ### Input and output behavior
 
 - WAV input supports 16-bit PCM, 24-bit PCM, 32-bit PCM, and 32-bit float.
-- Multi-channel input is downmixed to mono by averaging channels.
-- Framed output can be emitted as `text`, `csv`, `bin`, or `none`.
+- Multi-channel input can be averaged to mono or a single channel can be selected with `--channel`.
+- Framed output can be emitted as `text`, `csv`, `json`, `bin`, or `none`.
+- `--min-hz` and `--max-hz` limit emitted `text`, `csv`, and `json` bins plus summary peaks to a frequency band.
+- `--window` controls framed analysis windows, while `--full-window` applies a whole-signal window before an exact whole-file FFT.
 - Whole-file benchmark mode prints a comparison table and exits.
 
 ## Examples
@@ -341,6 +348,12 @@ Options:
 
 ```bash
 cargo run --release -- input.wav --backend cpu --summary -f none
+```
+
+### Analyze only the left channel in a frequency band
+
+```bash
+cargo run --release -- input.wav --channel left --min-hz 80 --max-hz 5000 --summary -f none
 ```
 
 ### Framed benchmark against the CPU baseline
@@ -352,7 +365,7 @@ cargo run --release -- input.wav --benchmark --bench-repeats 5 -f none
 ### Whole-file exact FFT benchmark on an existing WAV
 
 ```bash
-cargo run --release -- input.wav --apply-full-hann --whole-file-benchmark --bench-repeats 1 -f none
+cargo run --release -- input.wav --full-window hann --whole-file-benchmark --bench-repeats 1 -f none
 ```
 
 ### Generate a sine wave and benchmark the entire signal
@@ -371,6 +384,12 @@ target/release/audiofft \
 
 ```bash
 cargo run --release -- input.wav --fft-size 4096 --hop 1024 --format csv --output spectrum.csv
+```
+
+### Export filtered spectra as JSON
+
+```bash
+cargo run --release -- input.wav --window blackman --min-hz 20 --max-hz 2000 --format json --output spectrum.json
 ```
 
 ## Whole-file benchmark methodology
