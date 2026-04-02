@@ -214,25 +214,31 @@ pub fn window_coeffs_f64(window: WindowFunction, size: usize) -> Vec<f64> {
 }
 
 pub fn window_coeffs_qd(window: WindowFunction, size: usize) -> Vec<Quad> {
-    use std::f64::consts::PI;
-
     if size <= 1 {
         return vec![Quad::ONE; size];
     }
 
-    let cast = |v: f64| Quad::from(v);
+    let denom = Quad::from((size - 1) as f64);
+    let phase_step = Quad::TWO_PI / denom;
     match window {
         WindowFunction::Rect => vec![Quad::ONE; size],
         WindowFunction::Hann => (0..size)
-            .map(|n| cast(0.5 * (1.0 - (2.0 * PI * n as f64 / (size - 1) as f64).cos())))
+            .map(|n| {
+                let phase = phase_step * Quad::from(n as f64);
+                Quad::from(0.5) * (Quad::ONE - phase.cos())
+            })
             .collect(),
         WindowFunction::Hamming => (0..size)
-            .map(|n| cast(0.54 - 0.46 * (2.0 * PI * n as f64 / (size - 1) as f64).cos()))
+            .map(|n| {
+                let phase = phase_step * Quad::from(n as f64);
+                Quad::from(0.54) - Quad::from(0.46) * phase.cos()
+            })
             .collect(),
         WindowFunction::Blackman => (0..size)
             .map(|n| {
-                let phase = 2.0 * PI * n as f64 / (size - 1) as f64;
-                cast(0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos())
+                let phase = phase_step * Quad::from(n as f64);
+                Quad::from(0.42) - Quad::from(0.5) * phase.cos()
+                    + Quad::from(0.08) * (phase + phase).cos()
             })
             .collect(),
     }

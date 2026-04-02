@@ -1,6 +1,6 @@
 # BlitzFFT
 
-`BlitzFFT` is a Rust CLI for audio Fourier analysis and exact whole-signal FFT benchmarking, with `64-bit` CPU processing and an experimental `128-bit` software quad CPU mode for framed analysis.
+`BlitzFFT` is a Rust CLI for audio Fourier analysis and exact whole-signal FFT benchmarking, with `64-bit` CPU processing and an experimental true `128-bit` `binary128` CPU mode for framed analysis.
 It has two complementary jobs:
 
 - framed analysis, similar to an STFT pipeline, with backend auto-selection `CUDA -> Metal -> CPU`
@@ -398,7 +398,7 @@ Options:
 - `--min-hz` and `--max-hz` limit emitted `text`, `csv`, and `json` bins plus summary peaks to a frequency band.
 - `--window` controls framed analysis windows, while `--full-window` applies a whole-signal window before an exact whole-file FFT.
 - `--precision 64` enables double-precision CPU processing for framed analysis and a reduced whole-file benchmark set.
-- `--precision 128` enables an experimental software quad-double CPU path for framed analysis.
+- `--precision 128` enables an experimental true `binary128` CPU path for framed analysis.
 - `--precision 128` currently does not support `--whole-file-benchmark`, and it does not use GPU backends.
 - Whole-file benchmark mode prints a comparison table and exits.
 
@@ -422,11 +422,13 @@ cargo run --release -- input.wav --channel left --min-hz 80 --max-hz 5000 --summ
 cargo run --release -- input.wav --precision 64 --backend cpu --summary -f none
 ```
 
-### Run framed analysis in experimental 128-bit software precision
+### Run framed analysis in experimental true 128-bit precision
 
 ```bash
 cargo run --release -- input.wav --precision 128 --backend cpu --summary -f none
 ```
+
+The current `128-bit` path uses Rust's unstable `f128` type with crate-local math helpers for trig and square root, enabled for this crate via `.cargo/config.toml`. That keeps the processing path native Rust while avoiding the broken platform `f128` trig/sqrt symbols on this macOS target.
 
 ### Framed benchmark against the CPU baseline
 

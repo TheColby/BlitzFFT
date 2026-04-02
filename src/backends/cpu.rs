@@ -180,8 +180,8 @@ fn fft_real_qd(frame: &[Quad], fft_size: usize) -> Vec<Quad> {
     let mut step = 2usize;
     while step <= fft_size {
         let half_step = step / 2;
-        let angle = -2.0 * std::f64::consts::PI / step as f64;
-        let twiddle_step = ComplexQuad::new(quad_from_f64(angle.cos()), quad_from_f64(angle.sin()));
+        let angle = -(Quad::TWO_PI / quad_from_f64(step as f64));
+        let twiddle_step = ComplexQuad::new(angle.cos(), angle.sin());
 
         for start in (0..fft_size).step_by(step) {
             let mut twiddle = ComplexQuad::new(Quad::ONE, Quad::ZERO);

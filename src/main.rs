@@ -1,3 +1,4 @@
+#![feature(f128)]
 // src/main.rs
 //
 // audiofft — GPU-accelerated FFT CLI
@@ -212,7 +213,7 @@ fn main() -> Result<()> {
         None
     };
     let mut mono128 = if args.precision == ProcessingPrecision::Bits128 {
-        Some(mono.iter().copied().map(|sample| Quad::from(sample as f64)).collect::<Vec<_>>())
+        Some(mono.iter().copied().map(Quad::from).collect::<Vec<_>>())
     } else {
         None
     };
@@ -309,7 +310,7 @@ fn main() -> Result<()> {
         select_backend(Some("cpu"))
     };
     let backend_label = if args.precision == ProcessingPrecision::Bits128 {
-        "Experimental radix-2 FFT (CPU - quad-double internal processing)".to_string()
+        "Experimental radix-2 FFT (CPU - native binary128 internal processing)".to_string()
     } else if args.precision == ProcessingPrecision::Bits64 {
         "RealFFT (CPU - f64 internal processing)".to_string()
     } else {
