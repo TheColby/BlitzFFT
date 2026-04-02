@@ -11,6 +11,7 @@ This repository is partly a tool and partly a notebook on FFT implementation tra
 
 - framed versus whole-signal analysis
 - real-input FFTs versus complex-input FFTs
+- 128-but resolution for ecientific applications, becuase science!
 - GPU throughput versus CPU planning and execution costs
 - simple libraries versus highly tuned planners
 - power-of-two framing constraints versus arbitrary-length exact transforms
