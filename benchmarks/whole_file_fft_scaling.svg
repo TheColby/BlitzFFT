@@ -4,6 +4,7 @@
 <rect width="100%" height="100%" fill="#ffffff"/>
 <text x="110" y="34" font-family="Helvetica, Arial, sans-serif" font-size="30" font-weight="700" fill="#111827">Estimated Exact FFT Execution Time vs Signal Length</text>
 <text x="110" y="60" font-family="Helvetica, Arial, sans-serif" font-size="17" fill="#4b5563">384 kHz mono whole-file FFTs. The 1-hour anchor is simulated from the measured 48 kHz run; the rest use N log2 N scaling.</text>
+<rect x="110" y="688" width="930" height="54" fill="#f3f4f6" opacity="0.9"/>
 <line x1="110" y1="690.00" x2="1040" y2="690.00" stroke="#e5e7eb" stroke-width="1"/>
 <text x="96" y="695.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">0.1 s</text>
 <line x1="110" y1="569.60" x2="1040" y2="569.60" stroke="#e5e7eb" stroke-width="1"/>
@@ -16,28 +17,28 @@
 <text x="96" y="213.40" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">1000 s</text>
 <line x1="110" y1="88.00" x2="1040" y2="88.00" stroke="#e5e7eb" stroke-width="1"/>
 <text x="96" y="93.00" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#374151">10000 s</text>
-<line x1="110" y1="88" x2="110" y2="690" stroke="#111827" stroke-width="1.5"/>
-<line x1="110" y1="690" x2="1040" y2="690" stroke="#111827" stroke-width="1.5"/>
+<line x1="110" y1="88" x2="110" y2="690" stroke="#111827" stroke-width="1.75"/>
+<line x1="110" y1="690" x2="1040" y2="690" stroke="#111827" stroke-width="3"/>
 <line x1="375.71" y1="88" x2="375.71" y2="690" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="6 6"/>
 <text x="385.71" y="106.00" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#4b5563">Simulated 1-hour anchor</text>
-<line x1="110.00" y1="690" x2="110.00" y2="698" stroke="#111827" stroke-width="1"/>
-<text x="110.00" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">1 min</text>
-<line x1="242.86" y1="690" x2="242.86" y2="698" stroke="#111827" stroke-width="1"/>
-<text x="242.86" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">10 min</text>
-<line x1="375.71" y1="690" x2="375.71" y2="698" stroke="#111827" stroke-width="1"/>
-<text x="375.71" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">1 hr</text>
-<line x1="508.57" y1="690" x2="508.57" y2="698" stroke="#111827" stroke-width="1"/>
-<text x="508.57" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">6 hr</text>
-<line x1="641.43" y1="690" x2="641.43" y2="698" stroke="#111827" stroke-width="1"/>
-<text x="641.43" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">12 hr</text>
-<line x1="774.29" y1="690" x2="774.29" y2="698" stroke="#111827" stroke-width="1"/>
-<text x="774.29" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">24 hr</text>
-<line x1="907.14" y1="690" x2="907.14" y2="698" stroke="#111827" stroke-width="1"/>
-<text x="907.14" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">48 hr</text>
-<line x1="1040.00" y1="690" x2="1040.00" y2="698" stroke="#111827" stroke-width="1"/>
-<text x="1040.00" y="718" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">72 hr</text>
+<line x1="110.00" y1="680" x2="110.00" y2="700" stroke="#111827" stroke-width="1.5"/>
+<text x="110.00" y="721" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#374151">1 min</text>
+<line x1="242.86" y1="680" x2="242.86" y2="700" stroke="#111827" stroke-width="1.5"/>
+<text x="242.86" y="721" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#374151">10 min</text>
+<line x1="375.71" y1="680" x2="375.71" y2="700" stroke="#111827" stroke-width="1.5"/>
+<text x="375.71" y="721" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#374151">1 hr</text>
+<line x1="508.57" y1="680" x2="508.57" y2="700" stroke="#111827" stroke-width="1.5"/>
+<text x="508.57" y="721" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#374151">6 hr</text>
+<line x1="641.43" y1="680" x2="641.43" y2="700" stroke="#111827" stroke-width="1.5"/>
+<text x="641.43" y="721" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#374151">12 hr</text>
+<line x1="774.29" y1="680" x2="774.29" y2="700" stroke="#111827" stroke-width="1.5"/>
+<text x="774.29" y="721" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#374151">24 hr</text>
+<line x1="907.14" y1="680" x2="907.14" y2="700" stroke="#111827" stroke-width="1.5"/>
+<text x="907.14" y="721" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#374151">48 hr</text>
+<line x1="1040.00" y1="680" x2="1040.00" y2="700" stroke="#111827" stroke-width="1.5"/>
+<text x="1040.00" y="721" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#374151">72 hr</text>
 <text x="32" y="389.00" transform="rotate(-90 32 389.00)" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#111827">Estimated execution time (seconds, log scale)</text>
-<text x="575.00" y="832" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#111827">Exact whole-file FFT size at 384 kHz</text>
+<text x="575.00" y="832" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="700" fill="#111827">Exact whole-file FFT size at 384 kHz</text>
 <polyline fill="none" stroke="#1f77b4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="110.00,670.69 242.86,543.63 375.71,445.29 508.57,347.33 641.43,309.52 774.29,271.76 907.14,234.04 1040.00,211.99"/>
 <circle cx="375.71" cy="445.29" r="5.5" fill="#1f77b4" stroke="#ffffff" stroke-width="2"/>
 <circle cx="1040.00" cy="211.99" r="5.5" fill="#1f77b4" stroke="#ffffff" stroke-width="2"/>

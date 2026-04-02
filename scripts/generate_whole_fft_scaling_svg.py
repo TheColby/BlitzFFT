@@ -68,6 +68,7 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     margin_left, margin_right, margin_top, margin_bottom = 110, 280, 88, 170
     plot_width = width - margin_left - margin_right
     plot_height = height - margin_top - margin_bottom
+    x_axis_y = height - margin_bottom
     y_min, y_max = 0.1, 10000.0
     log_min = math.log10(y_min)
     log_max = math.log10(y_max)
@@ -135,6 +136,10 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
         'font-size="17" fill="#4b5563">'
         "384 kHz mono whole-file FFTs. The 1-hour anchor is simulated from the measured 48 kHz run; the rest use N log2 N scaling.</text>"
     )
+    add(
+        f'<rect x="{margin_left}" y="{x_axis_y - 2}" width="{plot_width}" height="54" '
+        'fill="#f3f4f6" opacity="0.9"/>'
+    )
 
     for tick in [0.1, 1, 10, 100, 1000, 10000]:
         y = y_pos(tick)
@@ -150,12 +155,12 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
 
     add(
         f'<line x1="{margin_left}" y1="{margin_top}" x2="{margin_left}" '
-        f'y2="{height - margin_bottom}" stroke="#111827" stroke-width="1.5"/>'
+        f'y2="{x_axis_y}" stroke="#111827" stroke-width="1.75"/>'
     )
     add(
-        f'<line x1="{margin_left}" y1="{height - margin_bottom}" '
-        f'x2="{width - margin_right}" y2="{height - margin_bottom}" '
-        'stroke="#111827" stroke-width="1.5"/>'
+        f'<line x1="{margin_left}" y1="{x_axis_y}" '
+        f'x2="{width - margin_right}" y2="{x_axis_y}" '
+        'stroke="#111827" stroke-width="3"/>'
     )
     anchor_x = x_pos(anchor_index)
     add(
@@ -172,12 +177,12 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     for index, (label, seconds) in enumerate(DURATIONS):
         x = x_pos(index)
         add(
-            f'<line x1="{x:.2f}" y1="{height - margin_bottom}" x2="{x:.2f}" '
-            f'y2="{height - margin_bottom + 8}" stroke="#111827" stroke-width="1"/>'
+            f'<line x1="{x:.2f}" y1="{x_axis_y - 10}" x2="{x:.2f}" '
+            f'y2="{x_axis_y + 10}" stroke="#111827" stroke-width="1.5"/>'
         )
         add(
-            f'<text x="{x:.2f}" y="{height - margin_bottom + 28}" text-anchor="middle" '
-            'font-family="Helvetica, Arial, sans-serif" font-size="15" '
+            f'<text x="{x:.2f}" y="{x_axis_y + 31}" text-anchor="middle" '
+            'font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700" '
             f'fill="#374151">{escape(label)}</text>'
         )
 
@@ -191,7 +196,7 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     add(
         f'<text x="{margin_left + plot_width / 2:.2f}" y="{height - 28}" '
         'text-anchor="middle" font-family="Helvetica, Arial, sans-serif" '
-        'font-size="16" fill="#111827">Exact whole-file FFT size at 384 kHz</text>'
+        'font-size="17" font-weight="700" fill="#111827">Exact whole-file FFT size at 384 kHz</text>'
     )
 
     end_labels: list[tuple[float, str, str, float]] = []
