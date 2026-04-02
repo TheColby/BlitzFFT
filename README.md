@@ -1,10 +1,10 @@
 # BlitzFFT
 
 `BlitzFFT` is a Rust CLI for audio Fourier analysis and exact whole-signal FFT benchmarking, with `64-bit` CPU processing and an experimental true `128-bit` `binary128` CPU mode for framed analysis.
-It has two complementary jobs:
+It has three complementary jobs:
 
 - framed analysis, similar to an STFT pipeline, with backend auto-selection `CUDA -> Metal -> CPU`
-- with frequency estimation errors of ±0.0000028 Hz (vs ±0.023 Hz for 32-bit) on an hour-long window, this provides >180 dB SNR for scientific instrumentation applications.
+- with frequency estimation errors of ±0.0000028 Hz (vs ±0.023 Hz for 32-bit) on an hour-long window, provide >180 dB SNR for scientific instrumentation applications
 - exact whole-file FFT benchmarking on one long real-valued waveform, including `FFTW3f`, `KissFFT`, `PocketFFT`, `RustFFT`, `RealFFT`, and the repo's buffer-reuse real-input path
 
 This repository is partly a tool and partly a notebook on FFT implementation tradeoffs. The code is useful on its own, but it is also a compact place to compare:
