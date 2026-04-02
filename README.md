@@ -541,7 +541,7 @@ $$
 
 The corresponding WAV would be about `5.15 GiB` on disk. In this workspace, the one-hour `384` kHz benchmark is treated as a simulation anchored to the measured `48` kHz run, because a direct six-library exact rerun at `1.3824` billion samples would exceed practical local memory and disk limits.
 
-The table below therefore reports a simulated one-hour anchor. `Exec` is projected with the same $N \log_2 N$ model used in the scaling graph. `Peak freq (Hz)` is shown at much higher precision so the off-bin `439.997` Hz target is visible.
+The table below therefore reports a simulated one-hour anchor. `Exec` is projected with the same $N \log_2 N$ model used in the scaling graph. In the live CLI benchmark table, `Peak freq (Hz)` is now reported as a quadratic sub-bin estimate around the loudest FFT bin and printed to `15` decimal places, so tiny backend-to-backend differences are visible when they exist. The simulated table below still shows the common nearest-bin center because this `384` kHz one-hour case is modeled rather than freshly rerun.
 
 | Algorithm | Setup (s) | Exec (s) | Peak bin | Peak freq (Hz) |
 |---|---:|---:|---:|---:|
@@ -553,6 +553,23 @@ The table below therefore reports a simulated one-hour anchor. `Exec` is project
 | KissFFT | simulated | 46.515731 | 1,583,989 | 439.996944444444 |
 
 The same numbers are also recorded in [`benchmarks/60min_whole_file_fft.md`](benchmarks/60min_whole_file_fft.md).
+
+On a measured shorter run, the extra resolution does expose tiny implementation differences. For example, with
+
+```bash
+cargo run --release -- --generate-sine 439.997,48000,10 --precision 32 --apply-full-hann --whole-file-benchmark --bench-repeats 1 -f none
+```
+
+the interpolated peak estimates come out as:
+
+| Algorithm | Peak bin | Peak freq (Hz) |
+|---|---:|---:|
+| BlitzFFT exact-real | 4,400 | 439.997757311980877 |
+| RealFFT | 4,400 | 439.997757311980877 |
+| RustFFT complex | 4,400 | 439.997757318645654 |
+| FFTW3f | 4,400 | 439.997757317381456 |
+| KissFFT | 4,400 | 439.997757313537420 |
+| PocketFFT | 4,400 | 439.997757311980877 |
 
 ## Estimated scaling to multi-day FFTs at 384 kHz
 

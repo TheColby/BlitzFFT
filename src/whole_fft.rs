@@ -20,6 +20,8 @@ pub struct WholeFftBenchResult {
     pub peak_mag: f32,
 }
 
+const PEAK_FREQ_DECIMALS: usize = 15;
+
 pub fn run_whole_signal_benchmark(
     signal: &[f32],
     sample_rate: u32,
@@ -64,17 +66,18 @@ pub fn print_whole_signal_table(results: &[WholeFftBenchResult], len: usize, sam
     );
     println!();
     println!(
-        "  {:<26} {:>12} {:>12} {:>12} {:>14} {:>14}",
+        "  {:<26} {:>12} {:>12} {:>12} {:>24} {:>14}",
         "Algorithm", "Setup (s)", "Exec (s)", "Peak bin", "Peak freq (Hz)", "Peak mag"
     );
-    println!("  {}", "-".repeat(100));
+    println!("  {}", "-".repeat(110));
     for result in results {
         println!(
-            "  {:<26} {:>12.6} {:>12.6} {:>12} {:>18.12} {:>14.6}",
+            "  {:<26} {:>12.6} {:>12.6} {:>12} {:>24.*} {:>14.6}",
             result.algorithm,
             result.setup_secs,
             result.exec_secs,
             result.peak_bin,
+            PEAK_FREQ_DECIMALS,
             result.peak_freq_hz,
             result.peak_mag,
         );
@@ -108,14 +111,14 @@ fn bench_blitzfft_real(
             .map_err(|err| anyhow!("BlitzFFT exact-real path failed: {err}"))?;
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
-    let (peak_bin, peak_mag) = peak_from_complex32(&output);
+    let (peak_bin, peak_mag, peak_freq_hz) = peak_from_complex32(&output, len, sample_rate);
 
     Ok(WholeFftBenchResult {
         algorithm: "BlitzFFT exact-real",
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
+        peak_freq_hz,
         peak_mag,
     })
 }
@@ -146,14 +149,14 @@ fn bench_blitzfft_real_f64(
             .map_err(|err| anyhow!("BlitzFFT exact-real f64 path failed: {err}"))?;
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
-    let (peak_bin, peak_mag) = peak_from_complex64(&output);
+    let (peak_bin, peak_mag, peak_freq_hz) = peak_from_complex64(&output, len, sample_rate);
 
     Ok(WholeFftBenchResult {
         algorithm: "BlitzFFT exact-real (f64)",
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
+        peak_freq_hz,
         peak_mag,
     })
 }
@@ -175,14 +178,14 @@ fn bench_realfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
             .map_err(|err| anyhow!("RealFFT failed: {err}"))?;
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
-    let (peak_bin, peak_mag) = peak_from_complex32(&last_output);
+    let (peak_bin, peak_mag, peak_freq_hz) = peak_from_complex32(&last_output, len, sample_rate);
 
     Ok(WholeFftBenchResult {
         algorithm: "RealFFT",
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
+        peak_freq_hz,
         peak_mag,
     })
 }
@@ -208,14 +211,14 @@ fn bench_realfft_f64(
             .map_err(|err| anyhow!("RealFFT f64 failed: {err}"))?;
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
-    let (peak_bin, peak_mag) = peak_from_complex64(&last_output);
+    let (peak_bin, peak_mag, peak_freq_hz) = peak_from_complex64(&last_output, len, sample_rate);
 
     Ok(WholeFftBenchResult {
         algorithm: "RealFFT (f64)",
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
+        peak_freq_hz,
         peak_mag,
     })
 }
@@ -238,14 +241,15 @@ fn bench_rustfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
     let half_len = len / 2 + 1;
-    let (peak_bin, peak_mag) = peak_from_complex32(&buffer[..half_len]);
+    let (peak_bin, peak_mag, peak_freq_hz) =
+        peak_from_complex32(&buffer[..half_len], len, sample_rate);
 
     Ok(WholeFftBenchResult {
         algorithm: "RustFFT complex",
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
+        peak_freq_hz,
         peak_mag,
     })
 }
@@ -272,14 +276,15 @@ fn bench_rustfft_f64(
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
     let half_len = len / 2 + 1;
-    let (peak_bin, peak_mag) = peak_from_complex64(&buffer[..half_len]);
+    let (peak_bin, peak_mag, peak_freq_hz) =
+        peak_from_complex64(&buffer[..half_len], len, sample_rate);
 
     Ok(WholeFftBenchResult {
         algorithm: "RustFFT complex (f64)",
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
+        peak_freq_hz,
         peak_mag,
     })
 }
@@ -299,14 +304,15 @@ fn bench_fftw(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<WholeF
         }
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
-    let (peak_bin, peak_mag) = unsafe { peak_from_fftw(fftw.output_slice()) };
+    let (peak_bin, peak_mag, peak_freq_hz) =
+        unsafe { peak_from_fftw(fftw.output_slice(), len, sample_rate) };
 
     Ok(WholeFftBenchResult {
         algorithm: "FFTW3f",
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
+        peak_freq_hz,
         peak_mag,
     })
 }
@@ -334,7 +340,7 @@ fn bench_kissfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
         }
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
-    let (peak_bin, peak_mag) = peak_from_kiss(&output);
+    let (peak_bin, peak_mag, peak_freq_hz) = peak_from_kiss(&output, len, sample_rate);
 
     unsafe {
         free(cfg.as_ptr());
@@ -345,7 +351,7 @@ fn bench_kissfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
+        peak_freq_hz,
         peak_mag,
     })
 }
@@ -370,63 +376,79 @@ fn bench_pocketfft(
         }
     }
     let exec_secs = exec_start.elapsed().as_secs_f64() / repeats as f64;
-    let (peak_bin, peak_mag) = peak_from_pocket(&output);
+    let (peak_bin, peak_mag, peak_freq_hz) = peak_from_pocket(&output, len, sample_rate);
 
     Ok(WholeFftBenchResult {
         algorithm: "PocketFFT",
         setup_secs,
         exec_secs,
         peak_bin,
-        peak_freq_hz: bin_to_hz_f64(peak_bin, len, sample_rate),
+        peak_freq_hz,
         peak_mag,
     })
 }
 
-fn bin_to_hz_f64(bin: usize, fft_size: usize, sample_rate: u32) -> f64 {
-    bin as f64 * sample_rate as f64 / fft_size as f64
+fn bin_to_hz_f64(bin: f64, fft_size: usize, sample_rate: u32) -> f64 {
+    bin * sample_rate as f64 / fft_size as f64
 }
 
-fn peak_from_complex32(values: &[Complex32]) -> (usize, f32) {
-    peak_from_slice(values.len(), |i| {
+fn peak_from_complex32(
+    values: &[Complex32],
+    fft_size: usize,
+    sample_rate: u32,
+) -> (usize, f32, f64) {
+    peak_from_slice(values.len(), fft_size, sample_rate, |i| {
         let c = values[i];
         (c.re * c.re + c.im * c.im).sqrt()
     })
 }
 
-fn peak_from_complex64(values: &[Complex64]) -> (usize, f32) {
-    values
-        .iter()
-        .enumerate()
-        .map(|(i, value)| {
-            let mag = (value.re * value.re + value.im * value.im).sqrt() as f32;
-            (i, mag)
-        })
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-        .unwrap_or((0, 0.0))
+fn peak_from_complex64(
+    values: &[Complex64],
+    fft_size: usize,
+    sample_rate: u32,
+) -> (usize, f32, f64) {
+    peak_from_slice(values.len(), fft_size, sample_rate, |i| {
+        let c = values[i];
+        (c.re * c.re + c.im * c.im).sqrt() as f32
+    })
 }
 
-unsafe fn peak_from_fftw(values: &[FftwComplex]) -> (usize, f32) {
-    peak_from_slice(values.len(), |i| {
+unsafe fn peak_from_fftw(
+    values: &[FftwComplex],
+    fft_size: usize,
+    sample_rate: u32,
+) -> (usize, f32, f64) {
+    peak_from_slice(values.len(), fft_size, sample_rate, |i| {
         let c = values[i];
         (c.re * c.re + c.im * c.im).sqrt()
     })
 }
 
-fn peak_from_kiss(values: &[KissFftCpx]) -> (usize, f32) {
-    peak_from_slice(values.len(), |i| {
+fn peak_from_kiss(values: &[KissFftCpx], fft_size: usize, sample_rate: u32) -> (usize, f32, f64) {
+    peak_from_slice(values.len(), fft_size, sample_rate, |i| {
         let c = values[i];
         (c.r * c.r + c.i * c.i).sqrt()
     })
 }
 
-fn peak_from_pocket(values: &[PocketFftComplex]) -> (usize, f32) {
-    peak_from_slice(values.len(), |i| {
+fn peak_from_pocket(
+    values: &[PocketFftComplex],
+    fft_size: usize,
+    sample_rate: u32,
+) -> (usize, f32, f64) {
+    peak_from_slice(values.len(), fft_size, sample_rate, |i| {
         let c = values[i];
         (c.re * c.re + c.im * c.im).sqrt()
     })
 }
 
-fn peak_from_slice(len: usize, magnitude_at: impl Fn(usize) -> f32) -> (usize, f32) {
+fn peak_from_slice(
+    len: usize,
+    fft_size: usize,
+    sample_rate: u32,
+    magnitude_at: impl Fn(usize) -> f32,
+) -> (usize, f32, f64) {
     let mut best_bin = 0usize;
     let mut best_mag = f32::MIN;
     for i in 0..len {
@@ -436,7 +458,33 @@ fn peak_from_slice(len: usize, magnitude_at: impl Fn(usize) -> f32) -> (usize, f
             best_mag = mag;
         }
     }
-    (best_bin, best_mag)
+
+    let peak_freq_hz = interpolated_peak_hz(best_bin, len, fft_size, sample_rate, &magnitude_at);
+    (best_bin, best_mag, peak_freq_hz)
+}
+
+fn interpolated_peak_hz(
+    peak_bin: usize,
+    spectrum_len: usize,
+    fft_size: usize,
+    sample_rate: u32,
+    magnitude_at: &impl Fn(usize) -> f32,
+) -> f64 {
+    let base_bin = peak_bin as f64;
+    if peak_bin == 0 || peak_bin + 1 >= spectrum_len {
+        return bin_to_hz_f64(base_bin, fft_size, sample_rate);
+    }
+
+    let alpha = magnitude_at(peak_bin - 1) as f64;
+    let beta = magnitude_at(peak_bin) as f64;
+    let gamma = magnitude_at(peak_bin + 1) as f64;
+    let denominator = alpha - 2.0 * beta + gamma;
+    if denominator.abs() < f64::EPSILON {
+        return bin_to_hz_f64(base_bin, fft_size, sample_rate);
+    }
+
+    let delta = (0.5 * (alpha - gamma) / denominator).clamp(-0.5, 0.5);
+    bin_to_hz_f64(base_bin + delta, fft_size, sample_rate)
 }
 
 struct FftwContext {

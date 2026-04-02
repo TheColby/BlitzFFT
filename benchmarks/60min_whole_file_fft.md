@@ -31,6 +31,7 @@ Notes:
 - This one-hour `384` kHz exact whole-file FFT scenario is simulated from the measured `48` kHz benchmark anchor using the same $N \log_2 N$ scaling model used elsewhere in the docs.
 - A direct six-library exact rerun at `1,382,400,000` samples would require substantially more local memory and disk than is practical in this workspace.
 - The nearest FFT bin to `439.997 Hz` over a one-hour observation window is bin `1,583,989`, at
+- In the live CLI whole-file benchmark table, `Peak freq (Hz)` is reported as a quadratic sub-bin estimate around the loudest bin and printed to `15` decimal places. The simulated table below keeps the shared nearest-bin center because this one-hour `384` kHz case is modeled, not freshly rerun.
 
 $$
 \frac{1{,}583{,}989}{3600} \approx 439.996944444444 \text{ Hz}
@@ -46,6 +47,23 @@ Results:
 | FFTW3f | simulated | 36.360388 | 1,583,989 | 439.996944444444 |
 | RustFFT complex | simulated | 38.872592 | 1,583,989 | 439.996944444444 |
 | KissFFT | simulated | 46.515731 | 1,583,989 | 439.996944444444 |
+
+Measured shorter runs do show the extra decimal precision separating backends. For example, with
+
+```bash
+cargo run --release -- --generate-sine 439.997,48000,10 --precision 32 --apply-full-hann --whole-file-benchmark --bench-repeats 1 -f none
+```
+
+the interpolated peak estimates are:
+
+| Algorithm | Peak bin | Peak freq (Hz) |
+|---|---:|---:|
+| BlitzFFT exact-real | 4,400 | 439.997757311980877 |
+| RealFFT | 4,400 | 439.997757311980877 |
+| RustFFT complex | 4,400 | 439.997757318645654 |
+| FFTW3f | 4,400 | 439.997757317381456 |
+| KissFFT | 4,400 | 439.997757313537420 |
+| PocketFFT | 4,400 | 439.997757311980877 |
 
 ## Tuning-Theory Aside
 
