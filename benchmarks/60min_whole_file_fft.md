@@ -31,7 +31,8 @@ Notes:
 - This one-hour `384` kHz exact whole-file FFT scenario is simulated from the measured `48` kHz benchmark anchor using the same $N \log_2 N$ scaling model used elsewhere in the docs.
 - A direct six-library exact rerun at `1,382,400,000` samples would require substantially more local memory and disk than is practical in this workspace.
 - The nearest FFT bin to `439.997 Hz` over a one-hour observation window is bin `1,583,989`, at
-- In the live CLI whole-file benchmark table, `Peak freq (Hz)` is reported as a quadratic sub-bin estimate around the loudest bin and printed to `15` decimal places. The simulated table below keeps the shared nearest-bin center because this one-hour `384` kHz case is modeled, not freshly rerun.
+- In the live CLI whole-file benchmark table, `Peak freq (Hz)` is reported as a quadratic sub-bin estimate around the loudest bin and printed to `25` decimal places. The simulated table below keeps the shared nearest-bin center because this one-hour `384` kHz case is modeled, not freshly rerun.
+- In the live CLI whole-file benchmark table, `Exec (s)` measures the transform call itself. Repeat-to-repeat input restoration is kept outside the timed region so repeated runs isolate FFT execution more cleanly.
 
 $$
 \frac{1{,}583{,}989}{3600} \approx 439.996944444444 \text{ Hz}

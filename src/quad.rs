@@ -40,7 +40,11 @@ impl Quad {
     }
 
     pub fn abs(self) -> Self {
-        if self.0 < 0.0 { -self } else { self }
+        if self.0 < 0.0 {
+            -self
+        } else {
+            self
+        }
     }
 
     pub fn sin(self) -> Self {

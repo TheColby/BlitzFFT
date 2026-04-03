@@ -483,7 +483,7 @@ The whole-file table reports two times:
 - `Setup`
   planner creation, config creation, allocation, or equivalent transform preparation
 - `Exec`
-  one measured transform run, excluding WAV load time but including any algorithm-specific input marshaling performed by the benchmark harness
+  one measured transform call, excluding WAV load time and excluding repeat-to-repeat input restoration performed by the benchmark harness
 
 That distinction is important. A planner-heavy library can look slower in one-shot runs even if it is excellent when a plan is reused many times. Conversely, a lightweight library can look great in a single transform but lose ground when the workload changes shape or dimensionality.
 
@@ -541,7 +541,7 @@ $$
 
 The corresponding WAV would be about `5.15 GiB` on disk. In this workspace, the one-hour `384` kHz benchmark is treated as a simulation anchored to the measured `48` kHz run, because a direct six-library exact rerun at `1.3824` billion samples would exceed practical local memory and disk limits.
 
-The table below therefore reports a simulated one-hour anchor. `Exec` is projected with the same $N \log_2 N$ model used in the scaling graph. In the live CLI benchmark table, `Peak freq (Hz)` is now reported as a quadratic sub-bin estimate around the loudest FFT bin and printed to `15` decimal places, so tiny backend-to-backend differences are visible when they exist. The simulated table below still shows the common nearest-bin center because this `384` kHz one-hour case is modeled rather than freshly rerun.
+The table below therefore reports a simulated one-hour anchor. `Exec` is projected with the same $N \log_2 N$ model used in the scaling graph. In the live CLI benchmark table, `Peak freq (Hz)` is now reported as a quadratic sub-bin estimate around the loudest FFT bin and printed to `25` decimal places, so tiny backend-to-backend differences are visible when they exist. The simulated table below still shows the common nearest-bin center because this `384` kHz one-hour case is modeled rather than freshly rerun.
 
 | Algorithm | Setup (s) | Exec (s) | Peak bin | Peak freq (Hz) |
 |---|---:|---:|---:|---:|

@@ -14,6 +14,7 @@ fn main() {
     println!("cargo:rerun-if-changed=vendor/kissfft/kiss_fftr.h");
     println!("cargo:rerun-if-changed=vendor/pocketfft/pocketfft_hdronly.h");
     println!("cargo:rerun-if-changed=src/native/pocketfft_bridge.cc");
+    println!("cargo:rerun-if-changed=shaders/blitz_fft.cu");
 
     compile_kissfft(&out_dir);
     compile_pocketfft_bridge(&out_dir);
@@ -21,6 +22,10 @@ fn main() {
 
     if env::var("CARGO_FEATURE_METAL").is_ok() {
         compile_metal_shader(&out_dir);
+    }
+
+    if env::var("CARGO_FEATURE_CUDA").is_ok() {
+        compile_cuda_kernel(&out_dir);
     }
 }
 
@@ -171,6 +176,42 @@ fn compile_metal_shader(out_dir: &Path) {
     );
 
     println!("cargo:rustc-env=METAL_LIBRARY_PATH={}", lib_out.display());
+}
+
+fn compile_cuda_kernel(out_dir: &Path) {
+    let src = PathBuf::from("shaders/blitz_fft.cu");
+    let ptx = out_dir.join("blitz_fft.ptx");
+
+    // Try to locate nvcc.
+    let nvcc_result = Command::new("nvcc")
+        .args([
+            "--ptx",
+            "-O3",
+            "-arch=sm_70",               // Volta+ baseline; fatbin would cover more arches
+            src.to_str().unwrap(),
+            "-o",
+            ptx.to_str().unwrap(),
+        ])
+        .status();
+
+    match nvcc_result {
+        Ok(status) if status.success() => {
+            println!("cargo:rustc-cfg=blitz_cuda_kernel");
+            println!("cargo:warning=BlitzFFT CUDA kernel compiled to PTX.");
+        }
+        Ok(status) => {
+            println!(
+                "cargo:warning=nvcc found but compilation failed (status {status}). \
+                 The CUDA backend will be unavailable."
+            );
+        }
+        Err(_) => {
+            println!(
+                "cargo:warning=nvcc not found. \
+                 Install the CUDA Toolkit to enable the native CUDA backend."
+            );
+        }
+    }
 }
 
 fn run_checked(cmd: &mut Command, context: &str) {

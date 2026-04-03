@@ -45,21 +45,45 @@ pub fn write_frames(
                 Some(p) => Box::new(BufWriter::new(File::create(p)?)),
                 None => Box::new(BufWriter::new(std::io::stdout())),
             };
-            write_text(&mut *w, frames, fft_size, sample_rate, top_bins, min_hz, max_hz)
+            write_text(
+                &mut *w,
+                frames,
+                fft_size,
+                sample_rate,
+                top_bins,
+                min_hz,
+                max_hz,
+            )
         }
         OutputFormat::Csv => {
             let mut w: Box<dyn Write> = match out_path {
                 Some(p) => Box::new(BufWriter::new(File::create(p)?)),
                 None => Box::new(BufWriter::new(std::io::stdout())),
             };
-            write_csv(&mut *w, frames, fft_size, sample_rate, top_bins, min_hz, max_hz)
+            write_csv(
+                &mut *w,
+                frames,
+                fft_size,
+                sample_rate,
+                top_bins,
+                min_hz,
+                max_hz,
+            )
         }
         OutputFormat::Json => {
             let mut w: Box<dyn Write> = match out_path {
                 Some(p) => Box::new(BufWriter::new(File::create(p)?)),
                 None => Box::new(BufWriter::new(std::io::stdout())),
             };
-            write_json(&mut *w, frames, fft_size, sample_rate, top_bins, min_hz, max_hz)
+            write_json(
+                &mut *w,
+                frames,
+                fft_size,
+                sample_rate,
+                top_bins,
+                min_hz,
+                max_hz,
+            )
         }
         OutputFormat::Bin => {
             if top_bins != 0 || min_hz.is_some() || max_hz.is_some() {
@@ -87,7 +111,14 @@ fn write_text(
     writeln!(w, "# frame | bin | freq_hz | magnitude")?;
 
     for f in frames {
-        let bins = emit_bins(&f.magnitude, fft_size, sample_rate, top_bins, min_hz, max_hz);
+        let bins = emit_bins(
+            &f.magnitude,
+            fft_size,
+            sample_rate,
+            top_bins,
+            min_hz,
+            max_hz,
+        );
         for (bin, mag) in bins {
             let hz = bin_to_hz(bin, fft_size, sample_rate);
             writeln!(w, "{:6} {:6} {:10.2} {:12.6}", f.frame_index, bin, hz, mag)?;
@@ -107,7 +138,14 @@ fn write_csv(
 ) -> Result<()> {
     writeln!(w, "frame,bin,freq_hz,magnitude")?;
     for f in frames {
-        let bins = emit_bins(&f.magnitude, fft_size, sample_rate, top_bins, min_hz, max_hz);
+        let bins = emit_bins(
+            &f.magnitude,
+            fft_size,
+            sample_rate,
+            top_bins,
+            min_hz,
+            max_hz,
+        );
         for (bin, mag) in bins {
             let hz = bin_to_hz(bin, fft_size, sample_rate);
             writeln!(w, "{},{},{:.4},{:.8}", f.frame_index, bin, hz, mag)?;
@@ -153,7 +191,11 @@ fn write_json(
         writeln!(
             w,
             "  }}{}",
-            if frame_index + 1 == frames.len() { "" } else { "," }
+            if frame_index + 1 == frames.len() {
+                ""
+            } else {
+                ","
+            }
         )?;
     }
     writeln!(w, "]")?;
@@ -213,7 +255,10 @@ pub fn print_summary(
     for f in frames {
         let bins = emit_bins(&f.magnitude, fft_size, sample_rate, 0, min_hz, max_hz);
         if bins.is_empty() {
-            println!("  frame {:>5}  peak      n/a  mag        n/a", f.frame_index);
+            println!(
+                "  frame {:>5}  peak      n/a  mag        n/a",
+                f.frame_index
+            );
         } else {
             let magnitudes: Vec<f32> = bins.iter().map(|(_, mag)| *mag).collect();
             let (peak_offset, mag) = peak_bin(&magnitudes);

@@ -64,8 +64,8 @@ def format_samples(samples: int) -> str:
 
 
 def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
-    width, height = 1320, 860
-    margin_left, margin_right, margin_top, margin_bottom = 110, 280, 88, 170
+    width, height = 1320, 940
+    margin_left, margin_right, margin_top, margin_bottom = 110, 280, 88, 250
     plot_width = width - margin_left - margin_right
     plot_height = height - margin_top - margin_bottom
     x_axis_y = height - margin_bottom
@@ -177,6 +177,10 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
     for index, (label, seconds) in enumerate(DURATIONS):
         x = x_pos(index)
         add(
+            f'<line x1="{x:.2f}" y1="{margin_top}" x2="{x:.2f}" '
+            f'y2="{x_axis_y}" stroke="#e5e7eb" stroke-width="1"/>'
+        )
+        add(
             f'<line x1="{x:.2f}" y1="{x_axis_y - 10}" x2="{x:.2f}" '
             f'y2="{x_axis_y + 10}" stroke="#111827" stroke-width="1.5"/>'
         )
@@ -194,7 +198,7 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
         "(seconds, log scale)</text>"
     )
     add(
-        f'<text x="{margin_left + plot_width / 2:.2f}" y="{height - 28}" '
+        f'<text x="{margin_left + plot_width / 2:.2f}" y="{height - 40}" '
         'text-anchor="middle" font-family="Helvetica, Arial, sans-serif" '
         'font-size="17" font-weight="700" fill="#111827">Exact whole-file FFT size at 384 kHz</text>'
     )
@@ -243,7 +247,7 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
         )
 
     callout_x = 110
-    callout_y = 706
+    callout_y = 790
     callout_lines = [
         "Samples at 384 kHz: 1 min = 23.04M, 1 hr = 1.382B, 24 hr = 33.178B, 72 hr = 99.533B",
         f"Simulated anchor point: {ANCHOR_DURATION_LABEL}, 1.382B samples, derived from the measured 48 kHz benchmark",

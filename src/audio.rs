@@ -112,24 +112,21 @@ pub fn load_wav(path: &Path, channel_selection: ChannelSelection) -> Result<(Vec
         (SampleFormat::Float, 32) => {
             collect_channel_samples(reader.samples::<f32>(), channels, channel_selection, |s| s)?
         }
-        (SampleFormat::Int, 16) => collect_channel_samples(
-            reader.samples::<i16>(),
-            channels,
-            channel_selection,
-            |s| s as f32 / 32768.0,
-        )?,
-        (SampleFormat::Int, 24) => collect_channel_samples(
-            reader.samples::<i32>(),
-            channels,
-            channel_selection,
-            |s| s as f32 / 8_388_608.0,
-        )?,
-        (SampleFormat::Int, 32) => collect_channel_samples(
-            reader.samples::<i32>(),
-            channels,
-            channel_selection,
-            |s| s as f32 / 2_147_483_648.0,
-        )?,
+        (SampleFormat::Int, 16) => {
+            collect_channel_samples(reader.samples::<i16>(), channels, channel_selection, |s| {
+                s as f32 / 32768.0
+            })?
+        }
+        (SampleFormat::Int, 24) => {
+            collect_channel_samples(reader.samples::<i32>(), channels, channel_selection, |s| {
+                s as f32 / 8_388_608.0
+            })?
+        }
+        (SampleFormat::Int, 32) => {
+            collect_channel_samples(reader.samples::<i32>(), channels, channel_selection, |s| {
+                s as f32 / 2_147_483_648.0
+            })?
+        }
         (fmt, bits) => return Err(anyhow!("Unsupported WAV format: {:?} {}-bit", fmt, bits)),
     };
 
@@ -347,7 +344,12 @@ pub fn frame_signal_f64<'a>(
     frame_signal_generic(signal, fft_size, hop, window)
 }
 
-pub fn frame_signal_qd(signal: &[Quad], fft_size: usize, hop: usize, window: &[Quad]) -> Vec<Vec<Quad>> {
+pub fn frame_signal_qd(
+    signal: &[Quad],
+    fft_size: usize,
+    hop: usize,
+    window: &[Quad],
+) -> Vec<Vec<Quad>> {
     if signal.is_empty() || hop == 0 {
         return vec![];
     }

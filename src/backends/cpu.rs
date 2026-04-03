@@ -1,148 +1,148 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+// src/backends/cpu.rs
+//
+// CPU framed-FFT backend — uses the native BlitzFFT engine (no external FFT libs).
+//
+// f32 path  : BlitzFftPlan (precomputed twiddles + SIMD), Rayon parallel batches.
+// f64 path  : BlitzFftPlan64 (precomputed twiddles, scalar f64).
+// quad path : hand-rolled radix-2 over Quad (binary-128 precision).
+
+use std::cell::RefCell;
+use std::sync::Arc;
 
 use anyhow::Result;
 use num_complex::{Complex32, Complex64};
 use rayon::prelude::*;
-use realfft::{RealFftPlanner, RealToComplex};
 
 use super::{FftBackend, FftFrame};
+use crate::blitz_fft::{get_plan, get_plan_64, BlitzFftPlan, BlitzFftPlan64};
 use crate::quad::Quad;
 
-type RealPlan = Arc<dyn RealToComplex<f32>>;
-type RealPlan64 = Arc<dyn RealToComplex<f64>>;
+// ─── f32 thread-local work buffers ───────────────────────────────────────────
 
-static PLAN_CACHE: once_cell::sync::Lazy<Mutex<HashMap<usize, RealPlan>>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
-static PLAN_CACHE_64: once_cell::sync::Lazy<Mutex<HashMap<usize, RealPlan64>>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
-
-fn get_plan(fft_size: usize) -> RealPlan {
-    let mut cache = PLAN_CACHE.lock().unwrap();
-    if let Some(plan) = cache.get(&fft_size) {
-        return Arc::clone(plan);
-    }
-
-    let mut planner = RealFftPlanner::<f32>::new();
-    let plan = planner.plan_fft_forward(fft_size);
-    cache.insert(fft_size, Arc::clone(&plan));
-    plan
-}
-
-fn get_plan_f64(fft_size: usize) -> RealPlan64 {
-    let mut cache = PLAN_CACHE_64.lock().unwrap();
-    if let Some(plan) = cache.get(&fft_size) {
-        return Arc::clone(plan);
-    }
-
-    let mut planner = RealFftPlanner::<f64>::new();
-    let plan = planner.plan_fft_forward(fft_size);
-    cache.insert(fft_size, Arc::clone(&plan));
-    plan
-}
-
-struct WorkBuffers {
-    input: Vec<f32>,
-    spectrum: Vec<Complex32>,
-    scratch: Vec<Complex32>,
-}
-
-struct WorkBuffers64 {
-    input: Vec<f64>,
-    spectrum: Vec<Complex64>,
-    scratch: Vec<Complex64>,
+struct WorkBuf32 {
+    fft_size: usize,
+    scratch: Vec<Complex32>, // length N/2
+    output: Vec<Complex32>,  // length N/2+1
 }
 
 thread_local! {
-    static WORK: RefCell<Option<WorkBuffers>> = const { RefCell::new(None) };
-    static WORK_64: RefCell<Option<WorkBuffers64>> = const { RefCell::new(None) };
+    static WORK32: RefCell<Option<WorkBuf32>> = const { RefCell::new(None) };
 }
 
-fn with_work_buffers<R>(
-    plan: &RealPlan,
-    fft_size: usize,
-    f: impl FnOnce(&mut WorkBuffers) -> R,
-) -> R {
-    WORK.with(|cell| {
+fn with_work32<R>(plan: &Arc<BlitzFftPlan>, f: impl FnOnce(&mut WorkBuf32) -> R) -> R {
+    WORK32.with(|cell| {
         let mut guard = cell.borrow_mut();
-        let needs_resize = guard.as_ref().map_or(true, |work| {
-            work.input.len() != fft_size || work.spectrum.len() != plan.complex_len()
-        });
-
-        if needs_resize {
-            *guard = Some(WorkBuffers {
-                input: vec![0.0; fft_size],
-                spectrum: plan.make_output_vec(),
-                scratch: plan.make_scratch_vec(),
+        let needs_reset = guard.as_ref().map_or(true, |w| w.fft_size != plan.n);
+        if needs_reset {
+            *guard = Some(WorkBuf32 {
+                fft_size: plan.n,
+                scratch: vec![Complex32::new(0.0, 0.0); plan.n / 2],
+                output: vec![Complex32::new(0.0, 0.0); plan.n / 2 + 1],
             });
         }
-
         f(guard.as_mut().unwrap())
     })
 }
 
-fn with_work_buffers_f64<R>(
-    plan: &RealPlan64,
-    fft_size: usize,
-    f: impl FnOnce(&mut WorkBuffers64) -> R,
-) -> R {
-    WORK_64.with(|cell| {
-        let mut guard = cell.borrow_mut();
-        let needs_resize = guard.as_ref().map_or(true, |work| {
-            work.input.len() != fft_size || work.spectrum.len() != plan.complex_len()
-        });
+// ─── f64 thread-local work buffers ───────────────────────────────────────────
 
-        if needs_resize {
-            *guard = Some(WorkBuffers64 {
-                input: vec![0.0; fft_size],
-                spectrum: plan.make_output_vec(),
-                scratch: plan.make_scratch_vec(),
+struct WorkBuf64 {
+    fft_size: usize,
+    scratch: Vec<Complex64>,
+    output: Vec<Complex64>,
+}
+
+thread_local! {
+    static WORK64: RefCell<Option<WorkBuf64>> = const { RefCell::new(None) };
+}
+
+fn with_work64<R>(plan: &Arc<BlitzFftPlan64>, f: impl FnOnce(&mut WorkBuf64) -> R) -> R {
+    WORK64.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let needs_reset = guard.as_ref().map_or(true, |w| w.fft_size != plan.n);
+        if needs_reset {
+            *guard = Some(WorkBuf64 {
+                fft_size: plan.n,
+                scratch: vec![Complex64::new(0.0, 0.0); plan.n / 2],
+                output: vec![Complex64::new(0.0, 0.0); plan.n / 2 + 1],
             });
         }
-
         f(guard.as_mut().unwrap())
     })
 }
 
-pub struct CpuFftBackend;
+// ─── Public compute functions ─────────────────────────────────────────────────
 
-impl CpuFftBackend {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-pub fn compute_batch_f64(frames: &[Vec<f64>], fft_size: usize) -> Result<Vec<FftFrame>> {
-    let plan = get_plan_f64(fft_size);
+/// Compute a batch of f32 frames in parallel using the native BlitzFFT engine.
+pub fn compute_batch_f32_native(
+    frames: &[&[f32]],
+    fft_size: usize,
+) -> Result<Vec<FftFrame>> {
+    let plan = get_plan(fft_size);
 
     frames
         .par_iter()
         .enumerate()
         .map(|(i, frame)| {
-            with_work_buffers_f64(&plan, fft_size, |work| {
+            with_work32(&plan, |work| {
+                // Zero-pad if frame is shorter than fft_size.
                 let len = frame.len().min(fft_size);
-                work.input[..len].copy_from_slice(&frame[..len]);
-                work.input[len..].fill(0.0);
+                let padded: Vec<f32> = if len == fft_size {
+                    frame.to_vec()
+                } else {
+                    let mut v = vec![0.0f32; fft_size];
+                    v[..len].copy_from_slice(&frame[..len]);
+                    v
+                };
 
-                plan.process_with_scratch(&mut work.input, &mut work.spectrum, &mut work.scratch)?;
+                plan.fft_real(&padded, &mut work.scratch, &mut work.output);
 
                 let magnitude = work
-                    .spectrum
+                    .output
                     .iter()
-                    .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+                    .map(|c| (c.re * c.re + c.im * c.im).sqrt())
                     .collect();
 
-                Ok(FftFrame {
-                    frame_index: i,
-                    magnitude,
-                })
+                Ok(FftFrame { frame_index: i, magnitude })
             })
         })
         .collect()
 }
+
+/// Compute a batch of f64 frames using the native BlitzFFT f64 engine.
+pub fn compute_batch_f64(frames: &[Vec<f64>], fft_size: usize) -> Result<Vec<FftFrame>> {
+    let plan = get_plan_64(fft_size);
+
+    frames
+        .par_iter()
+        .enumerate()
+        .map(|(i, frame)| {
+            with_work64(&plan, |work| {
+                let len = frame.len().min(fft_size);
+                let padded: Vec<f64> = if len == fft_size {
+                    frame.clone()
+                } else {
+                    let mut v = vec![0.0f64; fft_size];
+                    v[..len].copy_from_slice(&frame[..len]);
+                    v
+                };
+
+                plan.fft_real_pow2(&padded, &mut work.scratch, &mut work.output);
+
+                let magnitude = work
+                    .output
+                    .iter()
+                    .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
+                    .collect();
+
+                Ok(FftFrame { frame_index: i, magnitude })
+            })
+        })
+        .collect()
+}
+
+// ─── quad (binary-128) path ───────────────────────────────────────────────────
+// Retained as-is: already a native implementation with no external FFT library.
 
 #[derive(Clone, Copy)]
 struct ComplexQuad {
@@ -156,19 +156,11 @@ impl ComplexQuad {
     }
 }
 
-fn quad_from_f64(value: f64) -> Quad {
-    Quad::from(value)
-}
-
-fn quad_to_f64(value: Quad) -> f64 {
-    value.to_f64()
-}
-
 fn bit_reverse(index: usize, bits: u32) -> usize {
     index.reverse_bits() >> (usize::BITS - bits)
 }
 
-fn fft_real_qd(frame: &[Quad], fft_size: usize) -> Vec<Quad> {
+fn fft_real_qd_inner(frame: &[Quad], fft_size: usize) -> Vec<Quad> {
     let bits = fft_size.trailing_zeros();
     let mut buffer = vec![ComplexQuad::new(Quad::ZERO, Quad::ZERO); fft_size];
 
@@ -180,7 +172,7 @@ fn fft_real_qd(frame: &[Quad], fft_size: usize) -> Vec<Quad> {
     let mut step = 2usize;
     while step <= fft_size {
         let half_step = step / 2;
-        let angle = -(Quad::TWO_PI / quad_from_f64(step as f64));
+        let angle = -(Quad::TWO_PI / Quad::from(step as f64));
         let twiddle_step = ComplexQuad::new(angle.cos(), angle.sin());
 
         for start in (0..fft_size).step_by(step) {
@@ -192,19 +184,16 @@ fn fft_real_qd(frame: &[Quad], fft_size: usize) -> Vec<Quad> {
                     twiddle.re * odd.re - twiddle.im * odd.im,
                     twiddle.re * odd.im + twiddle.im * odd.re,
                 );
-
                 buffer[start + offset] =
                     ComplexQuad::new(even.re + product.re, even.im + product.im);
                 buffer[start + offset + half_step] =
                     ComplexQuad::new(even.re - product.re, even.im - product.im);
-
                 twiddle = ComplexQuad::new(
                     twiddle.re * twiddle_step.re - twiddle.im * twiddle_step.im,
                     twiddle.re * twiddle_step.im + twiddle.im * twiddle_step.re,
                 );
             }
         }
-
         step *= 2;
     }
 
@@ -219,54 +208,31 @@ pub fn compute_batch_qd(frames: &[Vec<Quad>], fft_size: usize) -> Result<Vec<Fft
         .par_iter()
         .enumerate()
         .map(|(i, frame)| {
-            let magnitude = fft_real_qd(frame, fft_size)
+            let magnitude = fft_real_qd_inner(frame, fft_size)
                 .into_iter()
-                .map(|value| quad_to_f64(value) as f32)
+                .map(|v| v.to_f64() as f32)
                 .collect();
-
-            Ok(FftFrame {
-                frame_index: i,
-                magnitude,
-            })
+            Ok(FftFrame { frame_index: i, magnitude })
         })
         .collect()
 }
 
+// ─── FftBackend impl ──────────────────────────────────────────────────────────
+
+pub struct CpuFftBackend;
+
+impl CpuFftBackend {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
 impl FftBackend for CpuFftBackend {
     fn name(&self) -> &str {
-        "RealFFT (CPU - plan-cached, Rayon parallel)"
+        "BlitzFFT native (CPU — precomputed twiddles + SIMD, Rayon parallel)"
     }
 
     fn compute_batch(&self, frames: &[&[f32]], fft_size: usize) -> Result<Vec<FftFrame>> {
-        let plan = get_plan(fft_size);
-
-        frames
-            .par_iter()
-            .enumerate()
-            .map(|(i, frame)| {
-                with_work_buffers(&plan, fft_size, |work| {
-                    let len = frame.len().min(fft_size);
-                    work.input[..len].copy_from_slice(&frame[..len]);
-                    work.input[len..].fill(0.0);
-
-                    plan.process_with_scratch(
-                        &mut work.input,
-                        &mut work.spectrum,
-                        &mut work.scratch,
-                    )?;
-
-                    let magnitude = work
-                        .spectrum
-                        .iter()
-                        .map(|c| (c.re * c.re + c.im * c.im).sqrt())
-                        .collect();
-
-                    Ok(FftFrame {
-                        frame_index: i,
-                        magnitude,
-                    })
-                })
-            })
-            .collect()
+        compute_batch_f32_native(frames, fft_size)
     }
 }

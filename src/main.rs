@@ -16,6 +16,7 @@
 mod audio;
 mod backends;
 mod benchmark;
+mod blitz_fft;
 mod output;
 mod quad;
 mod whole_fft;
@@ -331,7 +332,11 @@ fn main() -> Result<()> {
     let window = window_coeffs(args.window, args.fft_size);
     let flat_win = vec![1.0f32; args.fft_size]; // identity — GPU will window
     let gpu_applies_window = is_gpu && args.window == WindowFunction::Hann;
-    let win_ref = if gpu_applies_window { &flat_win } else { &window };
+    let win_ref = if gpu_applies_window {
+        &flat_win
+    } else {
+        &window
+    };
     let all_results = if let Some(ref mono128) = mono128 {
         let t_start = Instant::now();
         let window128 = window_coeffs_qd(args.window, args.fft_size);
