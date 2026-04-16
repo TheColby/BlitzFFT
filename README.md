@@ -362,6 +362,7 @@ cargo build --release --features "cuda metal foreign-fft"
 - `PocketFFT` is only compiled when the `pocketfft` feature is enabled through a small C++ bridge against the vendored header in `vendor/pocketfft/`.
 - The Metal shader is built by `build.rs` when the `metal` feature is enabled.
 - The CPU path always remains available.
+- GitHub Actions now checks the default stable build on Linux and macOS, plus a Linux `foreign-fft` job with FFTW installed.
 
 ## CLI
 

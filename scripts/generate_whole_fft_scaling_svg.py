@@ -92,9 +92,12 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
         return margin_top + (log_max - lv) / (log_max - log_min) * plot_height
 
     def relax_label_positions(items: list[tuple[float, str, str, float]]) -> list[tuple[float, str, str, float]]:
-        min_gap = 24.0
-        low = margin_top + 14
-        high = margin_top + plot_height - 14
+        # Each right-edge label is two lines tall, so we need noticeably more
+        # spacing than a single text baseline to keep GitHub's SVG renderer from
+        # visually colliding adjacent entries.
+        min_gap = 48.0
+        low = margin_top + 18
+        high = margin_top + plot_height - 18
         relaxed = sorted(items, key=lambda item: item[0])
         for idx in range(1, len(relaxed)):
             prev_y = relaxed[idx - 1][0]
@@ -106,10 +109,16 @@ def render_svg(series: dict[str, tuple[list[float], str]]) -> str:
             y, name, color, value = relaxed[idx]
             if next_y - y < min_gap:
                 relaxed[idx] = (next_y - min_gap, name, color, value)
-        return [
+        relaxed = [
             (min(max(y, low), high), name, color, value)
             for y, name, color, value in relaxed
         ]
+        for idx in range(1, len(relaxed)):
+            prev_y = relaxed[idx - 1][0]
+            y, name, color, value = relaxed[idx]
+            if y - prev_y < min_gap:
+                relaxed[idx] = (prev_y + min_gap, name, color, value)
+        return relaxed
 
     parts: list[str] = []
     add = parts.append

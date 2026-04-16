@@ -68,21 +68,21 @@
 <line x1="1048.00" y1="135.53" x2="1058.00" y2="135.53" stroke="#8c564b" stroke-width="2.5"/>
 <text x="1072.00" y="131.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#8c564b">KissFFT</text>
 <text x="1072.00" y="149.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 4029.7 s</text>
-<line x1="1048.00" y1="144.91" x2="1058.00" y2="159.53" stroke="#ff7f0e" stroke-width="2.5"/>
-<text x="1072.00" y="155.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#ff7f0e">RustFFT complex</text>
-<text x="1072.00" y="173.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 3367.5 s</text>
-<line x1="1048.00" y1="148.41" x2="1058.00" y2="183.53" stroke="#9467bd" stroke-width="2.5"/>
-<text x="1072.00" y="179.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#9467bd">FFTW3f</text>
-<text x="1072.00" y="197.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 3149.9 s</text>
-<line x1="1048.00" y1="174.05" x2="1058.00" y2="207.53" stroke="#d62728" stroke-width="2.5"/>
-<text x="1072.00" y="203.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#d62728">BlitzFFT exact-real</text>
-<text x="1072.00" y="221.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 1928.7 s</text>
-<line x1="1048.00" y1="178.33" x2="1058.00" y2="231.53" stroke="#2ca02c" stroke-width="2.5"/>
-<text x="1072.00" y="227.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#2ca02c">RealFFT</text>
-<text x="1072.00" y="245.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 1777.2 s</text>
-<line x1="1048.00" y1="211.99" x2="1058.00" y2="255.53" stroke="#1f77b4" stroke-width="2.5"/>
-<text x="1072.00" y="251.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#1f77b4">PocketFFT</text>
-<text x="1072.00" y="269.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 933.6 s</text>
+<line x1="1048.00" y1="144.91" x2="1058.00" y2="183.53" stroke="#ff7f0e" stroke-width="2.5"/>
+<text x="1072.00" y="179.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#ff7f0e">RustFFT complex</text>
+<text x="1072.00" y="197.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 3367.5 s</text>
+<line x1="1048.00" y1="148.41" x2="1058.00" y2="231.53" stroke="#9467bd" stroke-width="2.5"/>
+<text x="1072.00" y="227.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#9467bd">FFTW3f</text>
+<text x="1072.00" y="245.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 3149.9 s</text>
+<line x1="1048.00" y1="174.05" x2="1058.00" y2="279.53" stroke="#d62728" stroke-width="2.5"/>
+<text x="1072.00" y="275.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#d62728">BlitzFFT exact-real</text>
+<text x="1072.00" y="293.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 1928.7 s</text>
+<line x1="1048.00" y1="178.33" x2="1058.00" y2="327.53" stroke="#2ca02c" stroke-width="2.5"/>
+<text x="1072.00" y="323.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#2ca02c">RealFFT</text>
+<text x="1072.00" y="341.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 1777.2 s</text>
+<line x1="1048.00" y1="211.99" x2="1058.00" y2="375.53" stroke="#1f77b4" stroke-width="2.5"/>
+<text x="1072.00" y="371.53" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#1f77b4">PocketFFT</text>
+<text x="1072.00" y="389.53" font-family="Helvetica, Arial, sans-serif" font-size="13" fill="#4b5563">72 hr est. = 933.6 s</text>
 <rect x="110" y="790" width="1180" height="108" rx="12" fill="#f9fafb" stroke="#d1d5db"/>
 <text x="128" y="818" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">Samples at 384 kHz: 1 min = 23.04M, 1 hr = 1.382B, 24 hr = 33.178B, 72 hr = 99.533B</text>
 <text x="128" y="846" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#374151">Simulated anchor point: 1 hr, 1.382B samples, derived from the measured 48 kHz benchmark</text>
