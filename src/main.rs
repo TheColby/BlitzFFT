@@ -57,6 +57,18 @@ enum BackendChoice {
     about = "FFT analysis and benchmarking CLI with a native Rust CPU engine"
 )]
 struct Args {
+    /// List backend choices and whether they are compiled into this build
+    #[arg(long)]
+    list_backends: bool,
+
+    /// List precision modes and their build/runtime requirements
+    #[arg(long)]
+    list_precisions: bool,
+
+    /// List output formats supported by this build
+    #[arg(long)]
+    list_formats: bool,
+
     /// Input WAV file (16/24/32-bit PCM or f32)
     #[arg(value_name = "INPUT")]
     input: Option<PathBuf>,
@@ -160,10 +172,66 @@ fn synthesise_sine(freq: f32, sample_rate: u32, duration_secs: f32) -> (Vec<f32>
     (samples, sample_rate)
 }
 
+fn print_backends() {
+    println!("Supported backends:");
+    println!("  cpu    native Rust CPU backend (always available)");
+    #[cfg(feature = "cuda")]
+    println!("  cuda   compiled in; availability is checked at runtime");
+    #[cfg(not(feature = "cuda"))]
+    println!("  cuda   not compiled in; rebuild with `--features cuda`");
+    #[cfg(feature = "metal")]
+    println!("  metal  compiled in; availability is checked at runtime");
+    #[cfg(not(feature = "metal"))]
+    println!("  metal  not compiled in; rebuild with `--features metal`");
+}
+
+fn print_precisions() {
+    println!("Supported precisions:");
+    println!("  32   native `f32` processing; supports CPU and GPU backends");
+    println!("  64   native `f64` CPU processing; stable default");
+    if quad::TRUE_BINARY128_ENABLED {
+        println!("  128  experimental true `binary128` CPU processing; enabled in this build");
+    } else {
+        println!(
+            "  128  not enabled in this build; rebuild on nightly with `--features binary128`"
+        );
+    }
+}
+
+fn print_formats() {
+    println!("Supported output formats:");
+    println!("  text  human-readable spectrum table");
+    println!("  csv   comma-separated rows");
+    println!("  json  structured per-frame bins");
+    println!("  bin   raw little-endian `f32` magnitudes (requires `--output`)");
+    println!("  none  suppress frame output");
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.list_backends || args.list_precisions || args.list_formats {
+        let mut printed = false;
+        if args.list_backends {
+            print_backends();
+            printed = true;
+        }
+        if args.list_precisions {
+            if printed {
+                println!();
+            }
+            print_precisions();
+            printed = true;
+        }
+        if args.list_formats {
+            if printed {
+                println!();
+            }
+            print_formats();
+        }
+        return Ok(());
+    }
     if args.precision == ProcessingPrecision::Bits128 && !quad::TRUE_BINARY128_ENABLED {
         return Err(anyhow!(
             "--precision 128 is an opt-in nightly-only feature; rebuild with `--features binary128` on a nightly toolchain"

@@ -374,6 +374,9 @@ Arguments:
   [INPUT]  Input WAV file (16/24/32-bit PCM or f32)
 
 Options:
+      --list-backends                  List backend choices and whether they are compiled into this build
+      --list-precisions               List precision modes and their build/runtime requirements
+      --list-formats                  List output formats supported by this build
   -n, --fft-size <FFT_SIZE>            FFT frame size (must be a power of two) [default: 2048]
       --hop <HOP>                      Hop size in samples (default = fft_size/2)
       --batch-size <BATCH_SIZE>        Number of frames to process per GPU batch (default = all frames) [default: 0]
@@ -407,8 +410,17 @@ Options:
 - `--precision 128` enables an experimental true `binary128` CPU path for framed analysis when the crate is built with `--features binary128` on nightly Rust.
 - `--precision 128` currently does not support `--whole-file-benchmark`, and it does not use GPU backends.
 - Whole-file benchmark mode prints a comparison table and exits.
+- `--list-backends`, `--list-precisions`, and `--list-formats` work without an input file and report what this build supports.
 
 ## Examples
+
+### Show build capabilities
+
+```bash
+blitzfft --list-backends
+blitzfft --list-precisions
+blitzfft --list-formats
+```
 
 ### Standard framed analysis
 

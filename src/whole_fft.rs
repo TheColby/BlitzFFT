@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use num_complex::{Complex32, Complex64};
 use realfft::RealFftPlanner;
 use rustfft::FftPlanner;
@@ -9,6 +9,9 @@ use crate::blitz_fft::{fft_real_arbitrary_f64, get_plan, get_plan_64};
 
 #[cfg(any(have_fftw, have_kissfft))]
 use anyhow::Context;
+
+#[cfg(have_kissfft)]
+use anyhow::bail;
 
 #[cfg(any(have_fftw, have_kissfft, have_pocketfft))]
 use std::{
