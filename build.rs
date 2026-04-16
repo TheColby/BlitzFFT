@@ -7,6 +7,9 @@ use std::{
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
+    println!("cargo:rustc-check-cfg=cfg(have_fftw)");
+    println!("cargo:rustc-check-cfg=cfg(have_kissfft)");
+    println!("cargo:rustc-check-cfg=cfg(have_pocketfft)");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=vendor/kissfft/kiss_fft.c");
     println!("cargo:rerun-if-changed=vendor/kissfft/kiss_fftr.c");
@@ -16,9 +19,25 @@ fn main() {
     println!("cargo:rerun-if-changed=src/native/pocketfft_bridge.cc");
     println!("cargo:rerun-if-changed=shaders/blitz_fft.cu");
 
-    compile_kissfft(&out_dir);
-    compile_pocketfft_bridge(&out_dir);
-    link_fftw();
+    if env::var("CARGO_FEATURE_KISSFFT").is_ok() {
+        compile_kissfft(&out_dir);
+        println!("cargo:rustc-cfg=have_kissfft");
+    }
+
+    if env::var("CARGO_FEATURE_POCKETFFT").is_ok() {
+        compile_pocketfft_bridge(&out_dir);
+        println!("cargo:rustc-cfg=have_pocketfft");
+    }
+
+    if env::var("CARGO_FEATURE_FFTW").is_ok() {
+        if link_fftw() {
+            println!("cargo:rustc-cfg=have_fftw");
+        } else {
+            println!(
+                "cargo:warning=FFTW feature requested, but fftw3f was not found; FFTW comparisons will be disabled."
+            );
+        }
+    }
 
     if env::var("CARGO_FEATURE_METAL").is_ok() {
         compile_metal_shader(&out_dir);
@@ -110,7 +129,7 @@ fn compile_pocketfft_bridge(out_dir: &Path) {
     println!("cargo:rustc-link-lib=dylib=c++");
 }
 
-fn link_fftw() {
+fn link_fftw() -> bool {
     let output = Command::new("pkg-config")
         .args(["--libs", "--cflags", "fftw3f"])
         .output();
@@ -125,7 +144,7 @@ fn link_fftw() {
                     println!("cargo:rustc-link-lib={lib}");
                 }
             }
-            return;
+            return true;
         }
     }
 
@@ -136,11 +155,11 @@ fn link_fftw() {
         if dylib.exists() {
             println!("cargo:rustc-link-search=native={}", lib_dir.display());
             println!("cargo:rustc-link-lib=fftw3f");
-            return;
+            return true;
         }
     }
 
-    panic!("Unable to locate FFTW3 single-precision library (fftw3f)");
+    false
 }
 
 fn compile_metal_shader(out_dir: &Path) {
@@ -187,7 +206,7 @@ fn compile_cuda_kernel(out_dir: &Path) {
         .args([
             "--ptx",
             "-O3",
-            "-arch=sm_70",               // Volta+ baseline; fatbin would cover more arches
+            "-arch=sm_70", // Volta+ baseline; fatbin would cover more arches
             src.to_str().unwrap(),
             "-o",
             ptx.to_str().unwrap(),

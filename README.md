@@ -1,17 +1,17 @@
 # BlitzFFT
 
-`BlitzFFT` is a Rust CLI for audio Fourier analysis and exact whole-signal FFT benchmarking, with `64-bit` CPU processing and an experimental true `128-bit` `binary128` CPU mode for framed analysis.
+`BlitzFFT` is a Rust CLI for audio Fourier analysis and exact whole-signal FFT benchmarking, with a native Rust CPU engine, `64-bit` CPU processing, and an opt-in experimental `128-bit` `binary128` CPU mode for framed analysis on nightly Rust.
 It has three complementary jobs:
 
 - framed analysis, similar to an STFT pipeline, with backend auto-selection `CUDA -> Metal -> CPU`
 - with frequency estimation errors of ±0.0000028 Hz (vs ±0.023 Hz for 32-bit) on an hour-long window, provide >180 dB SNR for scientific instrumentation applications
-- exact whole-file FFT benchmarking on one long real-valued waveform, including `FFTW3f`, `KissFFT`, `PocketFFT`, `RustFFT`, `RealFFT`, and the repo's buffer-reuse real-input path
+- exact whole-file FFT benchmarking on one long real-valued waveform, with a pure-Rust default comparison set and optional foreign-library comparisons
 
 This repository is partly a tool and partly a notebook on FFT implementation tradeoffs. The code is useful on its own, but it is also a compact place to compare:
 
 - framed versus whole-signal analysis
 - real-input FFTs versus complex-input FFTs
-- 128-but resolution for ecientific applications, becuase science!
+- stable `64-bit` processing versus experimental `128-bit` processing
 - GPU throughput versus CPU planning and execution costs
 - simple libraries versus highly tuned planners
 - power-of-two framing constraints versus arbitrary-length exact transforms
@@ -31,6 +31,7 @@ This repository is partly a tool and partly a notebook on FFT implementation tra
 - [Whole-file benchmark methodology](#whole-file-benchmark-methodology)
 - [Simulated 60-minute whole-file FFT at 384 kHz](#simulated-60-minute-whole-file-fft-at-384-khz)
 - [Estimated scaling to multi-day FFTs at 384 kHz](#estimated-scaling-to-multi-day-ffts-at-384-khz)
+- [Roadmap](ROADMAP.md)
 - [Repository layout](#repository-layout)
 - [Reference map](#reference-map)
 - [License](#license)
@@ -57,10 +58,11 @@ The whole-file path is different. It treats the entire waveform as one signal an
 
 ## What changed recently
 
-- The CPU framed backend now uses `RealFFT` instead of materializing a full complex `RustFFT` input buffer for every frame.
+- The CPU framed backend now uses the native BlitzFFT engine instead of materializing a full complex `RustFFT` input buffer for every frame.
 - Framed results no longer allocate an unused full complex spectrum for each frame.
 - The repo now has an exact whole-file benchmark path for long real-valued signals, including non-power-of-two lengths.
-- The benchmark harness compares six paths side by side: `BlitzFFT exact-real`, `RealFFT`, `RustFFT complex`, `FFTW3f`, `KissFFT`, and `PocketFFT`.
+- The default whole-file benchmark compares three native-Rust paths side by side: `BlitzFFT native`, `RealFFT`, and `RustFFT complex`.
+- Optional `FFTW3f`, `KissFFT`, and `PocketFFT` comparisons can be enabled explicitly with Cargo features.
 - The benchmark docs now center a simulated one-hour `384` kHz scenario using a `439.997` Hz sine and a full-signal Hann window.
 
 ## What an FFT is
@@ -206,7 +208,7 @@ $$
 w[n] = \frac{1}{2} \left(1 - \cos\left(\frac{2 \pi n}{N - 1}\right)\right), \qquad 0 \le n < N
 $$
 
-In the CPU framed backend, the transform work is done with cached `RealFFT` plans plus thread-local work buffers. On Apple hardware, the Metal backend applies the frame window on-device. On NVIDIA systems, the CUDA backend is preferred when enabled and available.
+In the CPU framed backend, the transform work is done with cached native BlitzFFT plans plus thread-local work buffers. On Apple hardware, the Metal backend applies the frame window on-device. On NVIDIA systems, the CUDA backend is preferred when enabled and available.
 
 ### 2. Whole-file exact benchmark
 
@@ -314,28 +316,31 @@ If you force a backend from the CLI, that explicit choice wins.
 
 The benchmark table compares closely related but not identical implementation styles:
 
-- `BlitzFFT exact-real`
-  A real-input path built around `RealFFT` plan creation plus reusable input, output, and scratch buffers.
+- `BlitzFFT native`
+  The repo's own native Rust real-input path with reusable plans, scratch buffers, and output buffers.
 - `RealFFT`
   A direct `realfft` crate benchmark path that still uses a real-input transform, but with less aggressive buffer reuse in the harness.
 - `RustFFT complex`
   A baseline that converts the real signal into a full complex buffer and runs a standard complex FFT.
 - `FFTW3f`
-  The single-precision real-to-complex FFTW path discovered from the local machine.
+  An optional single-precision real-to-complex FFTW path discovered from the local machine when the `fftw` feature is enabled.
 - `KissFFT`
-  The real FFT path from the vendored KISS FFT C implementation.
+  An optional real FFT path from the vendored KISS FFT C implementation.
 - `PocketFFT`
-  A vendored C++ header-only path accessed through `src/native/pocketfft_bridge.cc`.
+  An optional vendored C++ header-only path accessed through `src/native/pocketfft_bridge.cc`.
 
 That means the benchmark is not just "algorithm A versus algorithm B". It is also measuring planning policy, data layout policy, and buffer-management style.
 
-When `--precision 64` is selected, the whole-file benchmark currently uses the CPU-side `RealFFT` and `RustFFT` double-precision paths plus the repo's reusable exact-real path. The vendored `PocketFFT`, `KissFFT`, and linked `FFTW3f` comparisons remain single-precision-only in this codebase today.
+When `--precision 64` is selected, the whole-file benchmark currently uses the CPU-side `RealFFT` and `RustFFT` double-precision paths plus the repo's reusable native real-input path. The optional `PocketFFT`, `KissFFT`, and `FFTW3f` comparisons remain single-precision-only in this codebase today.
 
 ## Build
 
 ```bash
-# CPU + exact whole-file benchmarks
+# Native Rust CPU build
 cargo build --release
+
+# Enable the optional foreign-library whole-file comparisons
+cargo build --release --features foreign-fft
 
 # Apple GPU backend
 cargo build --release --features metal
@@ -343,26 +348,27 @@ cargo build --release --features metal
 # NVIDIA GPU backend
 cargo build --release --features cuda
 
-# Everything enabled
-cargo build --release --features "cuda metal"
+# Everything enabled, including optional comparison backends
+cargo build --release --features "cuda metal foreign-fft"
 ```
 
 ### Build notes
 
-- `FFTW3f` is required for the whole-file benchmark table that includes FFTW.
-- `build.rs` first tries `pkg-config --libs --cflags fftw3f`.
-- If `pkg-config` does not succeed, `build.rs` falls back to checking `/opt/homebrew/lib` and `/usr/local/lib` for `libfftw3f.dylib`.
-- `KissFFT` is compiled from the vendored C sources in `vendor/kissfft/`.
-- `PocketFFT` is compiled through a small C++ bridge against the vendored header in `vendor/pocketfft/`.
+- The default build is native Rust and does not require FFTW, KISS FFT, or PocketFFT.
+- `--features foreign-fft` enables the optional comparison backends used in the larger whole-file benchmark tables.
+- `FFTW3f` is only needed when the `fftw` feature is enabled.
+- `build.rs` tries `pkg-config --libs --cflags fftw3f` first, then checks `/opt/homebrew/lib` and `/usr/local/lib` for `libfftw3f.dylib`.
+- `KissFFT` is only compiled when the `kissfft` feature is enabled.
+- `PocketFFT` is only compiled when the `pocketfft` feature is enabled through a small C++ bridge against the vendored header in `vendor/pocketfft/`.
 - The Metal shader is built by `build.rs` when the `metal` feature is enabled.
 - The CPU path always remains available.
 
 ## CLI
 
-The project name is `BlitzFFT`. The current binary name is still `audiofft`.
+The project name and binary name are both `blitzfft`.
 
 ```text
-Usage: audiofft [OPTIONS] [INPUT]
+Usage: blitzfft [OPTIONS] [INPUT]
 
 Arguments:
   [INPUT]  Input WAV file (16/24/32-bit PCM or f32)
@@ -398,7 +404,7 @@ Options:
 - `--min-hz` and `--max-hz` limit emitted `text`, `csv`, and `json` bins plus summary peaks to a frequency band.
 - `--window` controls framed analysis windows, while `--full-window` applies a whole-signal window before an exact whole-file FFT.
 - `--precision 64` enables double-precision CPU processing for framed analysis and a reduced whole-file benchmark set.
-- `--precision 128` enables an experimental true `binary128` CPU path for framed analysis.
+- `--precision 128` enables an experimental true `binary128` CPU path for framed analysis when the crate is built with `--features binary128` on nightly Rust.
 - `--precision 128` currently does not support `--whole-file-benchmark`, and it does not use GPU backends.
 - Whole-file benchmark mode prints a comparison table and exits.
 
@@ -425,10 +431,10 @@ cargo run --release -- input.wav --precision 64 --backend cpu --summary -f none
 ### Run framed analysis in experimental true 128-bit precision
 
 ```bash
-cargo run --release -- input.wav --precision 128 --backend cpu --summary -f none
+cargo +nightly run --release --features binary128 -- input.wav --precision 128 --backend cpu --summary -f none
 ```
 
-The current `128-bit` path uses Rust's unstable `f128` type with crate-local math helpers for trig and square root, enabled for this crate via `.cargo/config.toml`. That keeps the processing path native Rust while avoiding the broken platform `f128` trig/sqrt symbols on this macOS target.
+The current `128-bit` path is intentionally opt-in. It uses Rust's unstable `f128` type behind the `binary128` Cargo feature, with crate-local math helpers for trig and square root. The default build stays on stable Rust; if you pass `--precision 128` without that feature, the CLI exits with a clear error.
 
 ### Framed benchmark against the CPU baseline
 
@@ -451,7 +457,7 @@ cargo run --release -- input.wav --precision 64 --backend cpu --full-window hann
 ### Generate a sine wave and benchmark the entire signal
 
 ```bash
-target/release/audiofft \
+target/release/blitzfft \
   --generate-sine 439.997,384000,3600 \
   --apply-full-hann \
   --write-generated-wav data/sine_439p997hz_60min_384khz_f32_hann.wav \
@@ -541,13 +547,13 @@ $$
 
 The corresponding WAV would be about `5.15 GiB` on disk. In this workspace, the one-hour `384` kHz benchmark is treated as a simulation anchored to the measured `48` kHz run, because a direct six-library exact rerun at `1.3824` billion samples would exceed practical local memory and disk limits.
 
-The table below therefore reports a simulated one-hour anchor. `Exec` is projected with the same $N \log_2 N$ model used in the scaling graph. In the live CLI benchmark table, `Peak freq (Hz)` is now reported as a quadratic sub-bin estimate around the loudest FFT bin and printed to `25` decimal places, so tiny backend-to-backend differences are visible when they exist. The simulated table below still shows the common nearest-bin center because this `384` kHz one-hour case is modeled rather than freshly rerun.
+The table below therefore reports a simulated one-hour anchor. `Exec` is projected with the same $N \log_2 N$ model used in the scaling graph. In the live CLI benchmark table, `Peak est. (Hz)` is a quadratic sub-bin estimate around the loudest FFT bin and is printed to a conservative `12` decimal places to avoid implying more certainty than the `f64` estimate can support. The simulated table below still shows the common nearest-bin center because this `384` kHz one-hour case is modeled rather than freshly rerun.
 
-| Algorithm | Setup (s) | Exec (s) | Peak bin | Peak freq (Hz) |
+| Algorithm | Setup (s) | Exec (s) | Peak bin | Peak est. (Hz) |
 |---|---:|---:|---:|---:|
 | PocketFFT | simulated | 10.776736 | 1,583,989 | 439.996944444444 |
 | RealFFT | simulated | 20.514858 | 1,583,989 | 439.996944444444 |
-| BlitzFFT exact-real | simulated | 22.263636 | 1,583,989 | 439.996944444444 |
+| BlitzFFT native | simulated | 22.263636 | 1,583,989 | 439.996944444444 |
 | FFTW3f | simulated | 36.360388 | 1,583,989 | 439.996944444444 |
 | RustFFT complex | simulated | 38.872592 | 1,583,989 | 439.996944444444 |
 | KissFFT | simulated | 46.515731 | 1,583,989 | 439.996944444444 |
@@ -562,9 +568,9 @@ cargo run --release -- --generate-sine 439.997,48000,10 --precision 32 --apply-f
 
 the interpolated peak estimates come out as:
 
-| Algorithm | Peak bin | Peak freq (Hz) |
+| Algorithm | Peak bin | Peak est. (Hz) |
 |---|---:|---:|
-| BlitzFFT exact-real | 4,400 | 439.997757311980877 |
+| BlitzFFT native | 4,400 | 439.997757311980877 |
 | RealFFT | 4,400 | 439.997757311980877 |
 | RustFFT complex | 4,400 | 439.997757318645654 |
 | FFTW3f | 4,400 | 439.997757317381456 |
@@ -599,7 +605,7 @@ python3 scripts/generate_whole_fft_scaling_svg.py
 
 At the multi-day end of that estimate, the projected execution times at $384$ kHz are:
 
-| Duration | Samples | PocketFFT | RealFFT | BlitzFFT exact-real | FFTW3f | RustFFT complex | KissFFT |
+| Duration | Samples | PocketFFT | RealFFT | BlitzFFT native | FFTW3f | RustFFT complex | KissFFT |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 24 hr | 33,177,600,000 | 297.696 s | 566.701 s | 615.009 s | 1004.417 s | 1073.814 s | 1284.948 s |
 | 48 hr | 66,355,200,000 | 612.428 s | 1165.832 s | 1265.213 s | 2066.312 s | 2209.077 s | 2643.427 s |
@@ -688,22 +694,22 @@ Why it matters here: PocketFFT is a strong exact-whole-signal comparison point b
 
 Why they matter here:
 
-- the framed CPU backend uses `RealFFT`
+- the framed CPU backend uses the native BlitzFFT engine
 - the whole-file benchmark compares `RealFFT` and `RustFFT complex` directly
-- the repo's "exact-real" benchmark path is mostly about planner and buffer reuse around a real-input transform, not about inventing a brand-new Fourier algorithm
+- the repo's native whole-file path is mostly about planner and buffer reuse around a real-input transform, not about inventing a brand-new Fourier algorithm
 
 ### Repo-local implementation references
 
 - [`src/audio.rs`](src/audio.rs)
   WAV loading, mono downmixing, Hann window generation, and framing
 - [`src/backends/cpu.rs`](src/backends/cpu.rs)
-  cached `RealFFT` plans plus thread-local reusable work buffers
+  native BlitzFFT CPU execution paths plus reusable work buffers
 - [`src/whole_fft.rs`](src/whole_fft.rs)
   exact whole-signal benchmark harness and per-library bridge code
 - [`src/native/pocketfft_bridge.cc`](src/native/pocketfft_bridge.cc)
   Rust-to-PocketFFT bridge
 - [`build.rs`](build.rs)
-  KISS FFT compilation, PocketFFT bridge compilation, FFTW linking, and Metal shader compilation
+  optional foreign-backend compilation/linking plus Metal shader compilation
 
 ## License
 

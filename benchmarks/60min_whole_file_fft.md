@@ -17,7 +17,7 @@ Input:
 Command:
 
 ```bash
-target/release/audiofft \
+target/release/blitzfft \
   --generate-sine 439.997,384000,3600 \
   --apply-full-hann \
   --write-generated-wav data/sine_439p997hz_60min_384khz_f32_hann.wav \
@@ -31,7 +31,7 @@ Notes:
 - This one-hour `384` kHz exact whole-file FFT scenario is simulated from the measured `48` kHz benchmark anchor using the same $N \log_2 N$ scaling model used elsewhere in the docs.
 - A direct six-library exact rerun at `1,382,400,000` samples would require substantially more local memory and disk than is practical in this workspace.
 - The nearest FFT bin to `439.997 Hz` over a one-hour observation window is bin `1,583,989`, at
-- In the live CLI whole-file benchmark table, `Peak freq (Hz)` is reported as a quadratic sub-bin estimate around the loudest bin and printed to `25` decimal places. The simulated table below keeps the shared nearest-bin center because this one-hour `384` kHz case is modeled, not freshly rerun.
+- In the live CLI whole-file benchmark table, `Peak est. (Hz)` is reported as a quadratic sub-bin estimate around the loudest bin and printed to a conservative `12` decimal places. The simulated table below keeps the shared nearest-bin center because this one-hour `384` kHz case is modeled, not freshly rerun.
 - In the live CLI whole-file benchmark table, `Exec (s)` measures the transform call itself. Repeat-to-repeat input restoration is kept outside the timed region so repeated runs isolate FFT execution more cleanly.
 
 $$
@@ -40,11 +40,11 @@ $$
 
 Results:
 
-| Algorithm | Setup (s) | Exec (s) | Peak bin | Peak freq (Hz) |
+| Algorithm | Setup (s) | Exec (s) | Peak bin | Peak est. (Hz) |
 |---|---:|---:|---:|---:|
 | PocketFFT | simulated | 10.776736 | 1,583,989 | 439.996944444444 |
 | RealFFT | simulated | 20.514858 | 1,583,989 | 439.996944444444 |
-| BlitzFFT exact-real | simulated | 22.263636 | 1,583,989 | 439.996944444444 |
+| BlitzFFT native | simulated | 22.263636 | 1,583,989 | 439.996944444444 |
 | FFTW3f | simulated | 36.360388 | 1,583,989 | 439.996944444444 |
 | RustFFT complex | simulated | 38.872592 | 1,583,989 | 439.996944444444 |
 | KissFFT | simulated | 46.515731 | 1,583,989 | 439.996944444444 |
@@ -57,9 +57,9 @@ cargo run --release -- --generate-sine 439.997,48000,10 --precision 32 --apply-f
 
 the interpolated peak estimates are:
 
-| Algorithm | Peak bin | Peak freq (Hz) |
+| Algorithm | Peak bin | Peak est. (Hz) |
 |---|---:|---:|
-| BlitzFFT exact-real | 4,400 | 439.997757311980877 |
+| BlitzFFT native | 4,400 | 439.997757311980877 |
 | RealFFT | 4,400 | 439.997757311980877 |
 | RustFFT complex | 4,400 | 439.997757318645654 |
 | FFTW3f | 4,400 | 439.997757317381456 |
@@ -140,7 +140,7 @@ python3 scripts/generate_whole_fft_scaling_svg.py
 
 Estimated execution times at the multi-day end of the curve:
 
-| Duration | Samples | PocketFFT | RealFFT | BlitzFFT exact-real | FFTW3f | RustFFT complex | KissFFT |
+| Duration | Samples | PocketFFT | RealFFT | BlitzFFT native | FFTW3f | RustFFT complex | KissFFT |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 24 hr | 33,177,600,000 | 297.696 s | 566.701 s | 615.009 s | 1004.417 s | 1073.814 s | 1284.948 s |
 | 48 hr | 66,355,200,000 | 612.428 s | 1165.832 s | 1265.213 s | 2066.312 s | 2209.077 s | 2643.427 s |

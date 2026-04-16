@@ -1,16 +1,23 @@
-use std::{
-    ffi::c_void,
-    os::raw::{c_int, c_uint},
-    ptr::NonNull,
-    time::Instant,
-};
+use std::time::Instant;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use num_complex::{Complex32, Complex64};
 use realfft::RealFftPlanner;
 use rustfft::FftPlanner;
 
 use crate::blitz_fft::{fft_real_arbitrary_f64, get_plan, get_plan_64};
+
+#[cfg(any(have_fftw, have_kissfft))]
+use anyhow::Context;
+
+#[cfg(any(have_fftw, have_kissfft, have_pocketfft))]
+use std::{
+    ffi::c_void,
+    os::raw::{c_int, c_uint},
+};
+
+#[cfg(any(have_fftw, have_kissfft))]
+use std::ptr::NonNull;
 
 #[derive(Debug, Clone)]
 pub struct WholeFftBenchResult {
@@ -22,7 +29,7 @@ pub struct WholeFftBenchResult {
     pub peak_mag: f32,
 }
 
-const PEAK_FREQ_DECIMALS: usize = 25;
+const PEAK_FREQ_DECIMALS: usize = 12;
 
 pub fn run_whole_signal_benchmark(
     signal: &[f32],
@@ -35,8 +42,11 @@ pub fn run_whole_signal_benchmark(
     results.push(bench_blitzfft_real(signal, sample_rate, repeats)?);
     results.push(bench_realfft(signal, sample_rate, repeats)?);
     results.push(bench_rustfft(signal, sample_rate, repeats)?);
+    #[cfg(have_fftw)]
     results.push(bench_fftw(signal, sample_rate, repeats)?);
+    #[cfg(have_kissfft)]
     results.push(bench_kissfft(signal, sample_rate, repeats)?);
+    #[cfg(have_pocketfft)]
     results.push(bench_pocketfft(signal, sample_rate, repeats)?);
 
     Ok(results)
@@ -68,13 +78,13 @@ pub fn print_whole_signal_table(results: &[WholeFftBenchResult], len: usize, sam
     );
     println!();
     println!(
-        "  {:<26} {:>12} {:>12} {:>12} {:>34} {:>14}",
-        "Algorithm", "Setup (s)", "Exec (s)", "Peak bin", "Peak freq (Hz)", "Peak mag"
+        "  {:<26} {:>12} {:>12} {:>12} {:>21} {:>14}",
+        "Algorithm", "Setup (s)", "Exec (s)", "Peak bin", "Peak est. (Hz)", "Peak mag"
     );
-    println!("  {}", "-".repeat(120));
+    println!("  {}", "-".repeat(104));
     for result in results {
         println!(
-            "  {:<26} {:>12.6} {:>12.6} {:>12} {:>34.*} {:>14.6}",
+            "  {:<26} {:>12.6} {:>12.6} {:>12} {:>21.*} {:>14.6}",
             result.algorithm,
             result.setup_secs,
             result.exec_secs,
@@ -306,6 +316,7 @@ fn bench_rustfft_f64(
     })
 }
 
+#[cfg(have_fftw)]
 fn bench_fftw(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<WholeFftBenchResult> {
     let len = signal.len();
 
@@ -336,6 +347,7 @@ fn bench_fftw(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<WholeF
     })
 }
 
+#[cfg(have_kissfft)]
 fn bench_kissfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<WholeFftBenchResult> {
     let len = signal.len();
     if len % 2 != 0 {
@@ -375,6 +387,7 @@ fn bench_kissfft(signal: &[f32], sample_rate: u32, repeats: usize) -> Result<Who
     })
 }
 
+#[cfg(have_pocketfft)]
 fn bench_pocketfft(
     signal: &[f32],
     sample_rate: u32,
@@ -433,6 +446,7 @@ fn peak_from_complex64(
     })
 }
 
+#[cfg(have_fftw)]
 unsafe fn peak_from_fftw(
     values: &[FftwComplex],
     fft_size: usize,
@@ -444,6 +458,7 @@ unsafe fn peak_from_fftw(
     })
 }
 
+#[cfg(have_kissfft)]
 fn peak_from_kiss(values: &[KissFftCpx], fft_size: usize, sample_rate: u32) -> (usize, f32, f64) {
     peak_from_slice(values.len(), fft_size, sample_rate, |i| {
         let c = values[i];
@@ -451,6 +466,7 @@ fn peak_from_kiss(values: &[KissFftCpx], fft_size: usize, sample_rate: u32) -> (
     })
 }
 
+#[cfg(have_pocketfft)]
 fn peak_from_pocket(
     values: &[PocketFftComplex],
     fft_size: usize,
@@ -506,6 +522,7 @@ fn interpolated_peak_hz(
     bin_to_hz_f64(base_bin + delta, fft_size, sample_rate)
 }
 
+#[cfg(have_fftw)]
 struct FftwContext {
     plan: FftwfPlan,
     input: *mut f32,
@@ -515,6 +532,7 @@ struct FftwContext {
     setup_secs: f64,
 }
 
+#[cfg(have_fftw)]
 impl FftwContext {
     fn new(len: usize) -> Result<Self> {
         let setup_start = Instant::now();
@@ -551,6 +569,7 @@ impl FftwContext {
     }
 }
 
+#[cfg(have_fftw)]
 impl Drop for FftwContext {
     fn drop(&mut self) {
         unsafe {
@@ -561,6 +580,7 @@ impl Drop for FftwContext {
     }
 }
 
+#[cfg(have_fftw)]
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct FftwComplex {
@@ -568,6 +588,7 @@ struct FftwComplex {
     im: f32,
 }
 
+#[cfg(have_kissfft)]
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct KissFftCpx {
@@ -575,6 +596,7 @@ struct KissFftCpx {
     i: f32,
 }
 
+#[cfg(have_pocketfft)]
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct PocketFftComplex {
@@ -582,30 +604,42 @@ struct PocketFftComplex {
     im: f32,
 }
 
+#[cfg(have_fftw)]
 type FftwfPlan = *mut c_void;
 
+#[cfg(have_fftw)]
 const FFTW_ESTIMATE: c_uint = 1 << 6;
 
+#[cfg(any(have_fftw, have_kissfft, have_pocketfft))]
 unsafe extern "C" {
+    #[cfg(have_fftw)]
     fn fftwf_malloc(n: usize) -> *mut c_void;
+    #[cfg(have_fftw)]
     fn fftwf_free(p: *mut c_void);
+    #[cfg(have_fftw)]
     fn fftwf_plan_dft_r2c_1d(
         n: c_int,
         input: *mut f32,
         output: *mut FftwComplex,
         flags: c_uint,
     ) -> FftwfPlan;
+    #[cfg(have_fftw)]
     fn fftwf_execute(plan: FftwfPlan);
+    #[cfg(have_fftw)]
     fn fftwf_destroy_plan(plan: FftwfPlan);
 
+    #[cfg(have_kissfft)]
     fn kiss_fftr_alloc(
         nfft: c_int,
         inverse_fft: c_int,
         mem: *mut c_void,
         lenmem: *mut usize,
     ) -> *mut c_void;
+    #[cfg(have_kissfft)]
     fn kiss_fftr(cfg: *mut c_void, timedata: *const f32, freqdata: *mut KissFftCpx);
+    #[cfg(have_kissfft)]
     fn free(ptr: *mut c_void);
 
+    #[cfg(have_pocketfft)]
     fn pocketfft_r2c_f32(len: usize, input: *const f32, output_interleaved: *mut f32) -> c_int;
 }

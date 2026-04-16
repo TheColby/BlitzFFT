@@ -90,7 +90,14 @@ impl BlitzFftPlan {
             vec![]
         };
 
-        Self { n, m, bit_rev, twiddles, unpack, pow2 }
+        Self {
+            n,
+            m,
+            bit_rev,
+            twiddles,
+            unpack,
+            pow2,
+        }
     }
 
     // ── Scalar butterfly stage ──────────────────────────────────────────────
@@ -320,7 +327,8 @@ impl BlitzFftPlan {
             }
             #[cfg(target_arch = "x86_64")]
             {
-                if step >= 8 && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                if step >= 8 && is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma")
+                {
                     unsafe { Self::butterfly_stage_avx2(twiddles, buf, step, m) };
                 } else {
                     Self::butterfly_stage_scalar(twiddles, buf, step, m);
@@ -372,14 +380,8 @@ impl BlitzFftPlan {
             let zmk = scratch[m - k];
             let zmk_conj = Complex32::new(zmk.re, -zmk.im);
 
-            let even = Complex32::new(
-                (zk.re + zmk_conj.re) * 0.5,
-                (zk.im + zmk_conj.im) * 0.5,
-            );
-            let diff = Complex32::new(
-                (zk.re - zmk_conj.re) * 0.5,
-                (zk.im - zmk_conj.im) * 0.5,
-            );
+            let even = Complex32::new((zk.re + zmk_conj.re) * 0.5, (zk.im + zmk_conj.im) * 0.5);
+            let diff = Complex32::new((zk.re - zmk_conj.re) * 0.5, (zk.im - zmk_conj.im) * 0.5);
             // diff / (i) = (diff.im, -diff.re), so -(i·diff) / 2 = (diff.im, -diff.re) * 0.5
             // We already have the 0.5 factor in `diff`.
             let neg_i_diff = Complex32::new(diff.im, -diff.re);
@@ -395,14 +397,10 @@ impl BlitzFftPlan {
             if m - k != k {
                 let zk2 = zmk;
                 let zmk2_conj = Complex32::new(zk.re, -zk.im);
-                let even2 = Complex32::new(
-                    (zk2.re + zmk2_conj.re) * 0.5,
-                    (zk2.im + zmk2_conj.im) * 0.5,
-                );
-                let diff2 = Complex32::new(
-                    (zk2.re - zmk2_conj.re) * 0.5,
-                    (zk2.im - zmk2_conj.im) * 0.5,
-                );
+                let even2 =
+                    Complex32::new((zk2.re + zmk2_conj.re) * 0.5, (zk2.im + zmk2_conj.im) * 0.5);
+                let diff2 =
+                    Complex32::new((zk2.re - zmk2_conj.re) * 0.5, (zk2.im - zmk2_conj.im) * 0.5);
                 let neg_i_diff2 = Complex32::new(diff2.im, -diff2.re);
                 let w2 = self.unpack[m - k];
                 output[m - k] = Complex32::new(
@@ -491,12 +489,7 @@ impl BlitzFftPlan {
     /// `input`  — N real samples
     /// `output` — N/2+1 complex bins
     /// `scratch` — work buffer of length N/2 (used only when N is a power of two)
-    pub fn fft_real(
-        &self,
-        input: &[f32],
-        scratch: &mut [Complex32],
-        output: &mut [Complex32],
-    ) {
+    pub fn fft_real(&self, input: &[f32], scratch: &mut [Complex32], output: &mut [Complex32]) {
         if self.pow2 {
             self.fft_real_pow2(input, scratch, output);
         } else {
@@ -507,10 +500,7 @@ impl BlitzFftPlan {
             let half1 = n / 2 + 1;
             debug_assert_eq!(output.len(), half1);
 
-            let mut buf: Vec<Complex32> = input
-                .iter()
-                .map(|&r| Complex32::new(r, 0.0))
-                .collect();
+            let mut buf: Vec<Complex32> = input.iter().map(|&r| Complex32::new(r, 0.0)).collect();
             Self::fft_bluestein_inplace(&mut buf);
 
             output[..half1].copy_from_slice(&buf[..half1]);
@@ -551,10 +541,7 @@ fn fft_pow2_scratch(buf: &mut [Complex32]) {
             for k in 0..half {
                 let a = buf[start + k];
                 let b = buf[start + k + half];
-                let bw = Complex32::new(
-                    w.re * b.re - w.im * b.im,
-                    w.re * b.im + w.im * b.re,
-                );
+                let bw = Complex32::new(w.re * b.re - w.im * b.im, w.re * b.im + w.im * b.re);
                 buf[start + k] = Complex32::new(a.re + bw.re, a.im + bw.im);
                 buf[start + k + half] = Complex32::new(a.re - bw.re, a.im - bw.im);
                 w = Complex32::new(
@@ -604,7 +591,13 @@ impl BlitzFftPlan64 {
             })
             .collect();
 
-        Self { n, m, bit_rev, twiddles, unpack }
+        Self {
+            n,
+            m,
+            bit_rev,
+            twiddles,
+            unpack,
+        }
     }
 
     fn butterfly_stage_scalar(
@@ -674,14 +667,8 @@ impl BlitzFftPlan64 {
             let zk = scratch[k];
             let zmk = scratch[m - k];
             let zmk_conj = Complex64::new(zmk.re, -zmk.im);
-            let even = Complex64::new(
-                (zk.re + zmk_conj.re) * 0.5,
-                (zk.im + zmk_conj.im) * 0.5,
-            );
-            let diff = Complex64::new(
-                (zk.re - zmk_conj.re) * 0.5,
-                (zk.im - zmk_conj.im) * 0.5,
-            );
+            let even = Complex64::new((zk.re + zmk_conj.re) * 0.5, (zk.im + zmk_conj.im) * 0.5);
+            let diff = Complex64::new((zk.re - zmk_conj.re) * 0.5, (zk.im - zmk_conj.im) * 0.5);
             let neg_i_diff = Complex64::new(diff.im, -diff.re);
             let w = self.unpack[k];
             let xk = Complex64::new(
@@ -693,14 +680,10 @@ impl BlitzFftPlan64 {
             if m - k != k {
                 let zk2 = zmk;
                 let zmk2_conj = Complex64::new(zk.re, -zk.im);
-                let even2 = Complex64::new(
-                    (zk2.re + zmk2_conj.re) * 0.5,
-                    (zk2.im + zmk2_conj.im) * 0.5,
-                );
-                let diff2 = Complex64::new(
-                    (zk2.re - zmk2_conj.re) * 0.5,
-                    (zk2.im - zmk2_conj.im) * 0.5,
-                );
+                let even2 =
+                    Complex64::new((zk2.re + zmk2_conj.re) * 0.5, (zk2.im + zmk2_conj.im) * 0.5);
+                let diff2 =
+                    Complex64::new((zk2.re - zmk2_conj.re) * 0.5, (zk2.im - zmk2_conj.im) * 0.5);
                 let neg_i_diff2 = Complex64::new(diff2.im, -diff2.re);
                 let w2 = self.unpack[m - k];
                 output[m - k] = Complex64::new(
@@ -738,10 +721,7 @@ fn fft_pow2_scratch_f64(buf: &mut [Complex64]) {
             for k in 0..half {
                 let a = buf[start + k];
                 let b = buf[start + k + half];
-                let bw = Complex64::new(
-                    w.re * b.re - w.im * b.im,
-                    w.re * b.im + w.im * b.re,
-                );
+                let bw = Complex64::new(w.re * b.re - w.im * b.im, w.re * b.im + w.im * b.re);
                 buf[start + k] = Complex64::new(a.re + bw.re, a.im + bw.im);
                 buf[start + k + half] = Complex64::new(a.re - bw.re, a.im - bw.im);
                 w = Complex64::new(
@@ -759,6 +739,7 @@ fn fft_pow2_scratch_f64(buf: &mut [Complex64]) {
 
 /// Forward real-to-complex FFT for any N (f32).
 /// Output length = N/2+1.  Handles both power-of-two (fast path) and other N.
+#[allow(dead_code)]
 pub fn fft_real_arbitrary_f32(input: &[f32]) -> Vec<Complex32> {
     let n = input.len();
     let half1 = n / 2 + 1;
@@ -785,7 +766,7 @@ pub fn fft_real_arbitrary_f64(input: &[f64]) -> Vec<Complex64> {
 
     // Bluestein for arbitrary N (f64).
     let conv_len = (2 * n - 1).next_power_of_two();
-    let mut chirp: Vec<Complex64> = (0..n)
+    let chirp: Vec<Complex64> = (0..n)
         .map(|k| {
             let theta = -PI64 * (k * k % (2 * n)) as f64 / n as f64;
             Complex64::new(theta.cos(), theta.sin())
@@ -810,26 +791,29 @@ pub fn fft_real_arbitrary_f64(input: &[f64]) -> Vec<Complex64> {
     fft_pow2_scratch_f64(&mut h);
 
     for i in 0..conv_len {
-        let yr = y[i].re; let yi = y[i].im;
-        let hr = h[i].re; let hi = h[i].im;
+        let yr = y[i].re;
+        let yi = y[i].im;
+        let hr = h[i].re;
+        let hi = h[i].im;
         y[i] = Complex64::new(yr * hr - yi * hi, yr * hi + yi * hr);
     }
 
     // IFFT via conj + FFT + conj + scale.
-    for v in y.iter_mut() { *v = Complex64::new(v.re, -v.im); }
+    for v in y.iter_mut() {
+        *v = Complex64::new(v.re, -v.im);
+    }
     fft_pow2_scratch_f64(&mut y);
     let scale = 1.0 / conv_len as f64;
-    for v in y.iter_mut() { *v = Complex64::new(v.re * scale, -v.im * scale); }
+    for v in y.iter_mut() {
+        *v = Complex64::new(v.re * scale, -v.im * scale);
+    }
 
     // Output X[k] = chirp[k] * y[k], keep only 0..N/2+1
     let mut output = vec![Complex64::new(0.0, 0.0); half1];
     for k in 0..half1 {
         let yk = y[k];
         let ck = chirp[k];
-        output[k] = Complex64::new(
-            ck.re * yk.re - ck.im * yk.im,
-            ck.re * yk.im + ck.im * yk.re,
-        );
+        output[k] = Complex64::new(ck.re * yk.re - ck.im * yk.im, ck.re * yk.im + ck.im * yk.re);
     }
     output
 }
@@ -862,4 +846,135 @@ pub fn get_plan_64(n: usize) -> Arc<BlitzFftPlan64> {
     let p = Arc::new(BlitzFftPlan64::new(n));
     cache.insert(n, Arc::clone(&p));
     p
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fft_real_arbitrary_f32, fft_real_arbitrary_f64, get_plan, get_plan_64};
+    use num_complex::{Complex32, Complex64};
+    use std::sync::Arc;
+
+    fn naive_rfft_f32(input: &[f32]) -> Vec<Complex32> {
+        let n = input.len();
+        (0..=n / 2)
+            .map(|k| {
+                let mut sum = Complex32::new(0.0, 0.0);
+                for (n_idx, &sample) in input.iter().enumerate() {
+                    let theta =
+                        -2.0 * std::f32::consts::PI * (k as f32) * (n_idx as f32) / (n as f32);
+                    let twiddle = Complex32::new(theta.cos(), theta.sin());
+                    sum += twiddle * sample;
+                }
+                sum
+            })
+            .collect()
+    }
+
+    fn naive_rfft_f64(input: &[f64]) -> Vec<Complex64> {
+        let n = input.len();
+        (0..=n / 2)
+            .map(|k| {
+                let mut sum = Complex64::new(0.0, 0.0);
+                for (n_idx, &sample) in input.iter().enumerate() {
+                    let theta =
+                        -2.0 * std::f64::consts::PI * (k as f64) * (n_idx as f64) / (n as f64);
+                    let twiddle = Complex64::new(theta.cos(), theta.sin());
+                    sum += twiddle * sample;
+                }
+                sum
+            })
+            .collect()
+    }
+
+    fn assert_bins_close_f32(actual: &[Complex32], expected: &[Complex32], tolerance: f32) {
+        assert_eq!(actual.len(), expected.len());
+        for (index, (actual, expected)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (actual.re - expected.re).abs() <= tolerance,
+                "real bin {index} differed: {} vs {}",
+                actual.re,
+                expected.re
+            );
+            assert!(
+                (actual.im - expected.im).abs() <= tolerance,
+                "imag bin {index} differed: {} vs {}",
+                actual.im,
+                expected.im
+            );
+        }
+    }
+
+    fn assert_bins_close_f64(actual: &[Complex64], expected: &[Complex64], tolerance: f64) {
+        assert_eq!(actual.len(), expected.len());
+        for (index, (actual, expected)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (actual.re - expected.re).abs() <= tolerance,
+                "real bin {index} differed: {} vs {}",
+                actual.re,
+                expected.re
+            );
+            assert!(
+                (actual.im - expected.im).abs() <= tolerance,
+                "imag bin {index} differed: {} vs {}",
+                actual.im,
+                expected.im
+            );
+        }
+    }
+
+    #[test]
+    fn pow2_real_fft_matches_naive_reference() {
+        let input = [0.25, -1.0, 0.5, 0.75, -0.125, 0.0, 1.5, -0.25];
+        let plan = get_plan(input.len());
+        let mut scratch = vec![Complex32::new(0.0, 0.0); input.len() / 2];
+        let mut output = vec![Complex32::new(0.0, 0.0); input.len() / 2 + 1];
+
+        plan.fft_real(&input, &mut scratch, &mut output);
+
+        let expected = naive_rfft_f32(&input);
+        assert_bins_close_f32(&output, &expected, 1e-4);
+    }
+
+    #[test]
+    fn arbitrary_length_real_fft_matches_naive_reference() {
+        let input = [0.5, -0.25, 1.0, 0.125, -0.75, 0.3, 0.2, -0.4, 0.9];
+        let plan = get_plan(input.len());
+        let mut scratch = vec![Complex32::new(0.0, 0.0); input.len() / 2];
+        let mut output = vec![Complex32::new(0.0, 0.0); input.len() / 2 + 1];
+
+        plan.fft_real(&input, &mut scratch, &mut output);
+
+        let expected = naive_rfft_f32(&input);
+        assert_bins_close_f32(&output, &expected, 1e-3);
+        assert_bins_close_f32(&fft_real_arbitrary_f32(&input), &expected, 1e-3);
+    }
+
+    #[test]
+    fn f64_paths_match_naive_reference() {
+        let input = [0.125, 0.5, -1.5, 0.25, 0.75, -0.125, 0.0, 1.25];
+        let plan = get_plan_64(input.len());
+        let mut scratch = vec![Complex64::new(0.0, 0.0); input.len() / 2];
+        let mut output = vec![Complex64::new(0.0, 0.0); input.len() / 2 + 1];
+
+        plan.fft_real_pow2(&input, &mut scratch, &mut output);
+
+        let expected = naive_rfft_f64(&input);
+        assert_bins_close_f64(&output, &expected, 1e-9);
+
+        let arbitrary_input = [0.125, -0.75, 0.5, 1.0, -0.25, 0.875, -0.5];
+        let expected_arbitrary = naive_rfft_f64(&arbitrary_input);
+        let actual_arbitrary = fft_real_arbitrary_f64(&arbitrary_input);
+        assert_bins_close_f64(&actual_arbitrary, &expected_arbitrary, 1e-9);
+    }
+
+    #[test]
+    fn plan_cache_reuses_allocated_plans() {
+        let first = get_plan(32);
+        let second = get_plan(32);
+        let first64 = get_plan_64(64);
+        let second64 = get_plan_64(64);
+
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(Arc::ptr_eq(&first64, &second64));
+    }
 }

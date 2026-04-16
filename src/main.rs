@@ -1,17 +1,17 @@
-#![feature(f128)]
+#![cfg_attr(feature = "binary128", feature(f128))]
 // src/main.rs
 //
-// audiofft — GPU-accelerated FFT CLI
+// blitzfft — FFT analysis and benchmarking CLI
 //
-// Priority: CUDA (cuFFT) → Metal → CPU (RealFFT)
+// Priority: CUDA → Metal → CPU
 //
 // Usage examples
 // ──────────────
-//   audiofft input.wav                        # auto-select backend, print summary
-//   audiofft input.wav --backend metal        # force Metal
-//   audiofft input.wav --fft-size 4096 --hop 1024 --output spec.csv --format csv
-//   audiofft input.wav --benchmark            # compare GPU vs CPU
-//   audiofft --generate-sine 440,48000,2 --summary -f none
+//   blitzfft input.wav                        # auto-select backend, print summary
+//   blitzfft input.wav --backend metal        # force Metal
+//   blitzfft input.wav --fft-size 4096 --hop 1024 --output spec.csv --format csv
+//   blitzfft input.wav --benchmark            # compare selected backend vs CPU
+//   blitzfft --generate-sine 440,48000,2 --summary -f none
 
 mod audio;
 mod backends;
@@ -51,10 +51,10 @@ enum BackendChoice {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "audiofft",
+    name = "blitzfft",
     version = "0.1.0",
     author = "Colby Leider <colby@leider.org>",
-    about = "GPU-accelerated FFT for audio — CUDA (cuFFT) and Metal backends"
+    about = "FFT analysis and benchmarking CLI with a native Rust CPU engine"
 )]
 struct Args {
     /// Input WAV file (16/24/32-bit PCM or f32)
@@ -164,6 +164,11 @@ fn synthesise_sine(freq: f32, sample_rate: u32, duration_secs: f32) -> (Vec<f32>
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.precision == ProcessingPrecision::Bits128 && !quad::TRUE_BINARY128_ENABLED {
+        return Err(anyhow!(
+            "--precision 128 is an opt-in nightly-only feature; rebuild with `--features binary128` on a nightly toolchain"
+        ));
+    }
     let channel_selection: ChannelSelection = args
         .channel
         .parse()
@@ -311,9 +316,9 @@ fn main() -> Result<()> {
         select_backend(Some("cpu"))
     };
     let backend_label = if args.precision == ProcessingPrecision::Bits128 {
-        "Experimental radix-2 FFT (CPU - native binary128 internal processing)".to_string()
+        "Experimental CPU path (true binary128, nightly-only)".to_string()
     } else if args.precision == ProcessingPrecision::Bits64 {
-        "RealFFT (CPU - f64 internal processing)".to_string()
+        "BlitzFFT native (CPU - f64 internal processing)".to_string()
     } else {
         backend.name().to_string()
     };

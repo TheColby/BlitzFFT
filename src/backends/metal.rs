@@ -77,8 +77,7 @@ impl MetalFftBackend {
     pub fn try_init() -> Option<Self> {
         let device = Device::system_default()?;
         let lib_bytes = include_bytes!(env!("METAL_LIBRARY_PATH"));
-        let data = metal::DispatchData::from(lib_bytes.as_ref());
-        let library = device.new_library_with_data(data).ok()?;
+        let library = device.new_library_with_data(lib_bytes).ok()?;
 
         let pso = |name: &str| -> Option<ComputePipelineState> {
             let func = library.get_function(name, None).ok()?;
@@ -261,7 +260,7 @@ impl FftBackend for MetalFftBackend {
         cmd.wait_until_completed();
 
         // ── Read back (zero-copy on Apple Silicon) ────────────────────────
-        let cplx_ptr = bufs.cplx_out.contents() as *const [f32; 2];
+        let _cplx_ptr = bufs.cplx_out.contents() as *const [f32; 2];
         let mag_ptr = bufs.mag_out.contents() as *const f32;
 
         let out = (0..batch)

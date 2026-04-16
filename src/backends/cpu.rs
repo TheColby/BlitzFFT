@@ -4,7 +4,8 @@
 //
 // f32 path  : BlitzFftPlan (precomputed twiddles + SIMD), Rayon parallel batches.
 // f64 path  : BlitzFftPlan64 (precomputed twiddles, scalar f64).
-// quad path : hand-rolled radix-2 over Quad (binary-128 precision).
+// quad path : hand-rolled radix-2 over Quad (true binary128 only when the
+//             optional `binary128` feature is enabled).
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -74,10 +75,7 @@ fn with_work64<R>(plan: &Arc<BlitzFftPlan64>, f: impl FnOnce(&mut WorkBuf64) -> 
 // ─── Public compute functions ─────────────────────────────────────────────────
 
 /// Compute a batch of f32 frames in parallel using the native BlitzFFT engine.
-pub fn compute_batch_f32_native(
-    frames: &[&[f32]],
-    fft_size: usize,
-) -> Result<Vec<FftFrame>> {
+pub fn compute_batch_f32_native(frames: &[&[f32]], fft_size: usize) -> Result<Vec<FftFrame>> {
     let plan = get_plan(fft_size);
 
     frames
@@ -103,7 +101,10 @@ pub fn compute_batch_f32_native(
                     .map(|c| (c.re * c.re + c.im * c.im).sqrt())
                     .collect();
 
-                Ok(FftFrame { frame_index: i, magnitude })
+                Ok(FftFrame {
+                    frame_index: i,
+                    magnitude,
+                })
             })
         })
         .collect()
@@ -135,7 +136,10 @@ pub fn compute_batch_f64(frames: &[Vec<f64>], fft_size: usize) -> Result<Vec<Fft
                     .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
                     .collect();
 
-                Ok(FftFrame { frame_index: i, magnitude })
+                Ok(FftFrame {
+                    frame_index: i,
+                    magnitude,
+                })
             })
         })
         .collect()
@@ -212,7 +216,10 @@ pub fn compute_batch_qd(frames: &[Vec<Quad>], fft_size: usize) -> Result<Vec<Fft
                 .into_iter()
                 .map(|v| v.to_f64() as f32)
                 .collect();
-            Ok(FftFrame { frame_index: i, magnitude })
+            Ok(FftFrame {
+                frame_index: i,
+                magnitude,
+            })
         })
         .collect()
 }

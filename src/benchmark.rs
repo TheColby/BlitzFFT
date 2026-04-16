@@ -78,7 +78,7 @@ pub fn print_table(gpu: &BenchResult, cpu: &BenchResult) {
         "{}",
         "═══════════════════════════════════════════════════════".cyan()
     );
-    println!("{}", "  audiofft  —  Benchmark Results".cyan().bold());
+    println!("{}", "  blitzfft  —  Benchmark Results".cyan().bold());
     println!(
         "{}",
         "═══════════════════════════════════════════════════════".cyan()

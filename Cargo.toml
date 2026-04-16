@@ -1,20 +1,25 @@
 [package]
-name        = "audiofft"
+name        = "blitzfft"
 version     = "0.1.0"
 edition     = "2021"
-description = "GPU-accelerated FFT for audio — CUDA (cuFFT) and Metal backends"
+description = "Native Rust FFT for audio — SIMD CPU, CUDA, and Metal backends"
 authors     = ["Colby Leider <colby@leider.org>"]
 
 [[bin]]
-name = "audiofft"
+name = "blitzfft"
 path = "src/main.rs"
 
 # ── Features ────────────────────────────────────────────────────────────────
 [features]
-default  = []
-cuda     = ["dep:libloading"]      # cuFFT loaded at runtime via libloading
-metal    = ["dep:metal", "dep:objc", "dep:cocoa-foundation"]
-benchmark = []                     # emit timing stats
+default      = []
+cuda         = ["dep:libloading"]
+metal        = ["dep:metal", "dep:objc", "dep:cocoa-foundation"]
+binary128    = []
+fftw         = []
+kissfft      = []
+pocketfft    = []
+foreign-fft  = ["fftw", "kissfft", "pocketfft"]
+benchmark    = []
 
 # ── Core dependencies ────────────────────────────────────────────────────────
 [dependencies]

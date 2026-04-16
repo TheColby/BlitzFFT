@@ -1,7 +1,15 @@
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+pub const TRUE_BINARY128_ENABLED: bool = cfg!(feature = "binary128");
+
+#[cfg(feature = "binary128")]
+type QuadInner = f128;
+
+#[cfg(not(feature = "binary128"))]
+type QuadInner = f64;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd)]
-pub struct Quad(pub f128);
+pub struct Quad(pub QuadInner);
 
 impl Quad {
     pub const ZERO: Self = Self(0.0);
@@ -12,7 +20,7 @@ impl Quad {
     const SERIES_EPSILON: Self = Self(1e-34);
 
     pub fn from_f64(value: f64) -> Self {
-        Self(value as f128)
+        Self(value as QuadInner)
     }
 
     pub fn to_f64(self) -> f64 {
@@ -24,7 +32,7 @@ impl Quad {
             return Self::ZERO;
         }
         if self.0 < 0.0 {
-            return Self(f128::NAN);
+            return Self(QuadInner::NAN);
         }
 
         let mut x = Self::from_f64(self.to_f64().sqrt());
@@ -127,7 +135,7 @@ impl From<f64> for Quad {
 
 impl From<f32> for Quad {
     fn from(value: f32) -> Self {
-        Self(value as f128)
+        Self(value as QuadInner)
     }
 }
 

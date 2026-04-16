@@ -106,7 +106,7 @@ fn write_text(
     min_hz: Option<f32>,
     max_hz: Option<f32>,
 ) -> Result<()> {
-    writeln!(w, "# audiofft — magnitude spectrum")?;
+    writeln!(w, "# blitzfft — magnitude spectrum")?;
     writeln!(w, "# fft_size={} sample_rate={}", fft_size, sample_rate)?;
     writeln!(w, "# frame | bin | freq_hz | magnitude")?;
 
