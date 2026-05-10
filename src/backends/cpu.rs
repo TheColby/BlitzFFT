@@ -22,6 +22,8 @@ use crate::quad::Quad;
 
 struct WorkBuf32 {
     fft_size: usize,
+    input: Vec<f32>,
+    input_len: usize,
     scratch: Vec<Complex32>, // length N/2
     output: Vec<Complex32>,  // length N/2+1
 }
@@ -37,6 +39,8 @@ fn with_work32<R>(plan: &Arc<BlitzFftPlan>, f: impl FnOnce(&mut WorkBuf32) -> R)
         if needs_reset {
             *guard = Some(WorkBuf32 {
                 fft_size: plan.n,
+                input: vec![0.0f32; plan.n],
+                input_len: 0,
                 scratch: vec![Complex32::new(0.0, 0.0); plan.n / 2],
                 output: vec![Complex32::new(0.0, 0.0); plan.n / 2 + 1],
             });
@@ -49,6 +53,8 @@ fn with_work32<R>(plan: &Arc<BlitzFftPlan>, f: impl FnOnce(&mut WorkBuf32) -> R)
 
 struct WorkBuf64 {
     fft_size: usize,
+    input: Vec<f64>,
+    input_len: usize,
     scratch: Vec<Complex64>,
     output: Vec<Complex64>,
 }
@@ -64,6 +70,8 @@ fn with_work64<R>(plan: &Arc<BlitzFftPlan64>, f: impl FnOnce(&mut WorkBuf64) -> 
         if needs_reset {
             *guard = Some(WorkBuf64 {
                 fft_size: plan.n,
+                input: vec![0.0f64; plan.n],
+                input_len: 0,
                 scratch: vec![Complex64::new(0.0, 0.0); plan.n / 2],
                 output: vec![Complex64::new(0.0, 0.0); plan.n / 2 + 1],
             });
@@ -83,20 +91,28 @@ pub fn compute_batch_f32_native(frames: &[&[f32]], fft_size: usize) -> Result<Ve
         .enumerate()
         .map(|(i, frame)| {
             with_work32(&plan, |work| {
-                // Zero-pad if frame is shorter than fft_size.
                 let len = frame.len().min(fft_size);
-                let padded: Vec<f32> = if len == fft_size {
-                    frame.to_vec()
+                let WorkBuf32 {
+                    input,
+                    input_len,
+                    scratch,
+                    output,
+                    ..
+                } = work;
+                let input = if len == fft_size {
+                    &frame[..fft_size]
                 } else {
-                    let mut v = vec![0.0f32; fft_size];
-                    v[..len].copy_from_slice(&frame[..len]);
-                    v
+                    input[..len].copy_from_slice(&frame[..len]);
+                    if *input_len > len {
+                        input[len..*input_len].fill(0.0);
+                    }
+                    *input_len = len;
+                    &input[..]
                 };
 
-                plan.fft_real(&padded, &mut work.scratch, &mut work.output);
+                plan.fft_real(input, scratch, output);
 
-                let magnitude = work
-                    .output
+                let magnitude = output
                     .iter()
                     .map(|c| (c.re * c.re + c.im * c.im).sqrt())
                     .collect();
@@ -120,18 +136,27 @@ pub fn compute_batch_f64(frames: &[Vec<f64>], fft_size: usize) -> Result<Vec<Fft
         .map(|(i, frame)| {
             with_work64(&plan, |work| {
                 let len = frame.len().min(fft_size);
-                let padded: Vec<f64> = if len == fft_size {
-                    frame.clone()
+                let WorkBuf64 {
+                    input,
+                    input_len,
+                    scratch,
+                    output,
+                    ..
+                } = work;
+                let input = if len == fft_size {
+                    &frame[..fft_size]
                 } else {
-                    let mut v = vec![0.0f64; fft_size];
-                    v[..len].copy_from_slice(&frame[..len]);
-                    v
+                    input[..len].copy_from_slice(&frame[..len]);
+                    if *input_len > len {
+                        input[len..*input_len].fill(0.0);
+                    }
+                    *input_len = len;
+                    &input[..]
                 };
 
-                plan.fft_real_pow2(&padded, &mut work.scratch, &mut work.output);
+                plan.fft_real_pow2(input, scratch, output);
 
-                let magnitude = work
-                    .output
+                let magnitude = output
                     .iter()
                     .map(|c| ((c.re * c.re + c.im * c.im).sqrt()) as f32)
                     .collect();

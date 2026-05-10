@@ -31,6 +31,74 @@ use std::{
 use num_complex::{Complex32, Complex64};
 use once_cell::sync::Lazy;
 
+struct BlitzBluesteinPlan32 {
+    conv_len: usize,
+    chirp: Vec<Complex32>,
+    kernel_fft: Vec<Complex32>,
+}
+
+impl BlitzBluesteinPlan32 {
+    fn new(n: usize) -> Self {
+        let conv_len = (2 * n - 1).next_power_of_two();
+        let chirp: Vec<Complex32> = (0..n)
+            .map(|k| {
+                let theta = -PI32 * (k * k % (2 * n)) as f32 / n as f32;
+                Complex32::new(theta.cos(), theta.sin())
+            })
+            .collect();
+
+        let mut kernel_fft = vec![Complex32::new(0.0, 0.0); conv_len];
+        for k in 0..n {
+            let c = Complex32::new(chirp[k].re, -chirp[k].im);
+            kernel_fft[k] = c;
+            if k > 0 {
+                kernel_fft[conv_len - k] = c;
+            }
+        }
+        fft_pow2_scratch(&mut kernel_fft);
+
+        Self {
+            conv_len,
+            chirp,
+            kernel_fft,
+        }
+    }
+}
+
+struct BlitzBluesteinPlan64 {
+    conv_len: usize,
+    chirp: Vec<Complex64>,
+    kernel_fft: Vec<Complex64>,
+}
+
+impl BlitzBluesteinPlan64 {
+    fn new(n: usize) -> Self {
+        let conv_len = (2 * n - 1).next_power_of_two();
+        let chirp: Vec<Complex64> = (0..n)
+            .map(|k| {
+                let theta = -PI64 * (k * k % (2 * n)) as f64 / n as f64;
+                Complex64::new(theta.cos(), theta.sin())
+            })
+            .collect();
+
+        let mut kernel_fft = vec![Complex64::new(0.0, 0.0); conv_len];
+        for k in 0..n {
+            let c = Complex64::new(chirp[k].re, -chirp[k].im);
+            kernel_fft[k] = c;
+            if k > 0 {
+                kernel_fft[conv_len - k] = c;
+            }
+        }
+        fft_pow2_scratch_f64(&mut kernel_fft);
+
+        Self {
+            conv_len,
+            chirp,
+            kernel_fft,
+        }
+    }
+}
+
 // ─── f32 Plan ─────────────────────────────────────────────────────────────────
 
 /// Pre-planned FFT for a specific size N (f32 precision).
@@ -49,6 +117,8 @@ pub struct BlitzFftPlan {
     unpack: Vec<Complex32>,
     /// Whether N (or M for the real trick) is a power of two.
     pow2: bool,
+    /// Bluestein setup reused for arbitrary-length transforms.
+    bluestein: Option<BlitzBluesteinPlan32>,
 }
 
 impl BlitzFftPlan {
@@ -90,6 +160,12 @@ impl BlitzFftPlan {
             vec![]
         };
 
+        let bluestein = if pow2 {
+            None
+        } else {
+            Some(BlitzBluesteinPlan32::new(n))
+        };
+
         Self {
             n,
             m,
@@ -97,6 +173,7 @@ impl BlitzFftPlan {
             twiddles,
             unpack,
             pow2,
+            bluestein,
         }
     }
 
@@ -417,68 +494,46 @@ impl BlitzFftPlan {
     ///
     /// Computes `buf = DFT(buf)` for any N (not just power-of-two).
     /// Uses an internal power-of-two FFT of size ≥ 2N-1.
-    fn fft_bluestein_inplace(buf: &mut [Complex32]) {
-        let n = buf.len();
-        if n <= 1 {
-            return;
-        }
-        if n.is_power_of_two() {
-            // Use the fast path.
-            fft_pow2_scratch(buf);
-            return;
-        }
+    fn fft_bluestein_real(&self, input: &[f32], output: &mut [Complex32], work: &mut [Complex32]) {
+        let bluestein = self
+            .bluestein
+            .as_ref()
+            .expect("Bluestein plan is only present for arbitrary lengths");
+        debug_assert_eq!(input.len(), self.n);
+        debug_assert_eq!(output.len(), self.n / 2 + 1);
+        debug_assert_eq!(work.len(), bluestein.conv_len);
 
-        // Choose M = next power of two ≥ 2N-1 for the convolution.
-        let conv_len = (2 * n - 1).next_power_of_two();
-
-        // Precompute chirp: W_N^(k²/2) = exp(-πi·k²/N)
-        let mut chirp: Vec<Complex32> = Vec::with_capacity(n);
-        for k in 0..n {
-            let theta = -PI32 * (k * k % (2 * n)) as f32 / n as f32;
-            chirp.push(Complex32::new(theta.cos(), theta.sin()));
+        work.fill(Complex32::new(0.0, 0.0));
+        for (slot, (&sample, &chirp)) in work
+            .iter_mut()
+            .zip(input.iter().zip(bluestein.chirp.iter()))
+        {
+            *slot = Complex32::new(sample * chirp.re, sample * chirp.im);
         }
 
-        // y[k] = x[k] * chirp[k]
-        let mut y = vec![Complex32::new(0.0, 0.0); conv_len];
-        for k in 0..n {
-            y[k] = buf[k] * chirp[k];
+        fft_pow2_scratch(work);
+
+        for (slot, kernel) in work.iter_mut().zip(bluestein.kernel_fft.iter()) {
+            let wr = slot.re;
+            let wi = slot.im;
+            let kr = kernel.re;
+            let ki = kernel.im;
+            *slot = Complex32::new(wr * kr - wi * ki, wr * ki + wi * kr);
         }
 
-        // h[k] = conj(chirp[k]) for k = 0..N-1, zero-padded, wrap-around for negative indices.
-        let mut h = vec![Complex32::new(0.0, 0.0); conv_len];
-        for k in 0..n {
-            let c = Complex32::new(chirp[k].re, -chirp[k].im); // conj(chirp[k])
-            h[k] = c;
-            if k > 0 {
-                h[conv_len - k] = c;
-            }
+        for value in work.iter_mut() {
+            *value = Complex32::new(value.re, -value.im);
+        }
+        fft_pow2_scratch(work);
+        let scale = 1.0 / bluestein.conv_len as f32;
+        for value in work.iter_mut() {
+            *value = Complex32::new(value.re * scale, -value.im * scale);
         }
 
-        // Convolve y and h via FFT convolution.
-        fft_pow2_scratch(&mut y);
-        fft_pow2_scratch(&mut h);
-
-        for i in 0..conv_len {
-            let yr = y[i].re;
-            let yi = y[i].im;
-            let hr = h[i].re;
-            let hi = h[i].im;
-            y[i] = Complex32::new(yr * hr - yi * hi, yr * hi + yi * hr);
-        }
-
-        // IFFT via conj + FFT + conj + scale.
-        for v in y.iter_mut() {
-            *v = Complex32::new(v.re, -v.im);
-        }
-        fft_pow2_scratch(&mut y);
-        let scale = 1.0 / conv_len as f32;
-        for v in y.iter_mut() {
-            *v = Complex32::new(v.re * scale, -v.im * scale);
-        }
-
-        // Output: X[k] = chirp[k] * y[k]
-        for k in 0..n {
-            buf[k] = chirp[k] * y[k];
+        for (bin, out) in output.iter_mut().enumerate() {
+            let wk = work[bin];
+            let ck = bluestein.chirp[bin];
+            *out = Complex32::new(ck.re * wk.re - ck.im * wk.im, ck.re * wk.im + ck.im * wk.re);
         }
     }
 
@@ -493,17 +548,27 @@ impl BlitzFftPlan {
         if self.pow2 {
             self.fft_real_pow2(input, scratch, output);
         } else {
-            // For arbitrary N: Bluestein over the full complex signal.
-            // `scratch` is unused here; the Bluestein path allocates internally.
             let _ = scratch;
-            let n = self.n;
-            let half1 = n / 2 + 1;
-            debug_assert_eq!(output.len(), half1);
+            let mut work = vec![Complex32::new(0.0, 0.0); self.bluestein_work_len()];
+            self.fft_real_with_work(input, output, &mut work);
+        }
+    }
 
-            let mut buf: Vec<Complex32> = input.iter().map(|&r| Complex32::new(r, 0.0)).collect();
-            Self::fft_bluestein_inplace(&mut buf);
+    pub fn bluestein_work_len(&self) -> usize {
+        self.bluestein.as_ref().map_or(0, |plan| plan.conv_len)
+    }
 
-            output[..half1].copy_from_slice(&buf[..half1]);
+    pub fn fft_real_with_work(
+        &self,
+        input: &[f32],
+        output: &mut [Complex32],
+        work: &mut [Complex32],
+    ) {
+        if self.pow2 {
+            debug_assert_eq!(work.len(), self.m);
+            self.fft_real_pow2(input, work, output);
+        } else {
+            self.fft_bluestein_real(input, output, work);
         }
     }
 }
@@ -564,6 +629,47 @@ pub struct BlitzFftPlan64 {
     bit_rev: Vec<u32>,
     twiddles: Vec<Complex64>,
     unpack: Vec<Complex64>,
+}
+
+fn fft_real_bluestein_f64_with_plan(
+    input: &[f64],
+    output: &mut [Complex64],
+    work: &mut [Complex64],
+    plan: &BlitzBluesteinPlan64,
+) {
+    debug_assert_eq!(input.len(), plan.chirp.len());
+    debug_assert_eq!(output.len(), input.len() / 2 + 1);
+    debug_assert_eq!(work.len(), plan.conv_len);
+
+    work.fill(Complex64::new(0.0, 0.0));
+    for (slot, (&sample, &chirp)) in work.iter_mut().zip(input.iter().zip(plan.chirp.iter())) {
+        *slot = Complex64::new(sample * chirp.re, sample * chirp.im);
+    }
+
+    fft_pow2_scratch_f64(work);
+
+    for (slot, kernel) in work.iter_mut().zip(plan.kernel_fft.iter()) {
+        let wr = slot.re;
+        let wi = slot.im;
+        let kr = kernel.re;
+        let ki = kernel.im;
+        *slot = Complex64::new(wr * kr - wi * ki, wr * ki + wi * kr);
+    }
+
+    for value in work.iter_mut() {
+        *value = Complex64::new(value.re, -value.im);
+    }
+    fft_pow2_scratch_f64(work);
+    let scale = 1.0 / plan.conv_len as f64;
+    for value in work.iter_mut() {
+        *value = Complex64::new(value.re * scale, -value.im * scale);
+    }
+
+    for (bin, out) in output.iter_mut().enumerate() {
+        let wk = work[bin];
+        let ck = plan.chirp[bin];
+        *out = Complex64::new(ck.re * wk.re - ck.im * wk.im, ck.re * wk.im + ck.im * wk.re);
+    }
 }
 
 impl BlitzFftPlan64 {
@@ -752,6 +858,7 @@ pub fn fft_real_arbitrary_f32(input: &[f32]) -> Vec<Complex32> {
 
 /// Forward real-to-complex FFT for any N (f64).
 /// Output length = N/2+1.  Handles both power-of-two and other N.
+#[allow(dead_code)]
 pub fn fft_real_arbitrary_f64(input: &[f64]) -> Vec<Complex64> {
     let n = input.len();
     let half1 = n / 2 + 1;
@@ -764,57 +871,9 @@ pub fn fft_real_arbitrary_f64(input: &[f64]) -> Vec<Complex64> {
         return output;
     }
 
-    // Bluestein for arbitrary N (f64).
-    let conv_len = (2 * n - 1).next_power_of_two();
-    let chirp: Vec<Complex64> = (0..n)
-        .map(|k| {
-            let theta = -PI64 * (k * k % (2 * n)) as f64 / n as f64;
-            Complex64::new(theta.cos(), theta.sin())
-        })
-        .collect();
-
-    let mut y = vec![Complex64::new(0.0, 0.0); conv_len];
-    for k in 0..n {
-        y[k] = Complex64::new(input[k], 0.0) * chirp[k];
-    }
-
-    let mut h = vec![Complex64::new(0.0, 0.0); conv_len];
-    for k in 0..n {
-        let c = Complex64::new(chirp[k].re, -chirp[k].im);
-        h[k] = c;
-        if k > 0 {
-            h[conv_len - k] = c;
-        }
-    }
-
-    fft_pow2_scratch_f64(&mut y);
-    fft_pow2_scratch_f64(&mut h);
-
-    for i in 0..conv_len {
-        let yr = y[i].re;
-        let yi = y[i].im;
-        let hr = h[i].re;
-        let hi = h[i].im;
-        y[i] = Complex64::new(yr * hr - yi * hi, yr * hi + yi * hr);
-    }
-
-    // IFFT via conj + FFT + conj + scale.
-    for v in y.iter_mut() {
-        *v = Complex64::new(v.re, -v.im);
-    }
-    fft_pow2_scratch_f64(&mut y);
-    let scale = 1.0 / conv_len as f64;
-    for v in y.iter_mut() {
-        *v = Complex64::new(v.re * scale, -v.im * scale);
-    }
-
-    // Output X[k] = chirp[k] * y[k], keep only 0..N/2+1
     let mut output = vec![Complex64::new(0.0, 0.0); half1];
-    for k in 0..half1 {
-        let yk = y[k];
-        let ck = chirp[k];
-        output[k] = Complex64::new(ck.re * yk.re - ck.im * yk.im, ck.re * yk.im + ck.im * yk.re);
-    }
+    let mut work = vec![Complex64::new(0.0, 0.0); bluestein_work_len_64(n)];
+    fft_real_arbitrary_f64_with_work(input, &mut output, &mut work);
     output
 }
 
@@ -824,6 +883,9 @@ static PLAN_CACHE: Lazy<Mutex<HashMap<usize, Arc<BlitzFftPlan>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 static PLAN_CACHE_64: Lazy<Mutex<HashMap<usize, Arc<BlitzFftPlan64>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+static BLUESTEIN_PLAN_CACHE_64: Lazy<Mutex<HashMap<usize, Arc<BlitzBluesteinPlan64>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Return a shared plan for size `n` (f32), creating it on first use.
@@ -846,6 +908,37 @@ pub fn get_plan_64(n: usize) -> Arc<BlitzFftPlan64> {
     let p = Arc::new(BlitzFftPlan64::new(n));
     cache.insert(n, Arc::clone(&p));
     p
+}
+
+fn get_bluestein_plan_64(n: usize) -> Arc<BlitzBluesteinPlan64> {
+    let mut cache = BLUESTEIN_PLAN_CACHE_64.lock().unwrap();
+    if let Some(p) = cache.get(&n) {
+        return Arc::clone(p);
+    }
+    let p = Arc::new(BlitzBluesteinPlan64::new(n));
+    cache.insert(n, Arc::clone(&p));
+    p
+}
+
+pub fn bluestein_work_len_64(n: usize) -> usize {
+    get_bluestein_plan_64(n).conv_len
+}
+
+pub fn fft_real_arbitrary_f64_with_work(
+    input: &[f64],
+    output: &mut [Complex64],
+    work: &mut [Complex64],
+) {
+    let n = input.len();
+    if n.is_power_of_two() {
+        let plan = get_plan_64(n);
+        debug_assert_eq!(work.len(), n / 2);
+        plan.fft_real_pow2(input, work, output);
+        return;
+    }
+
+    let bluestein = get_bluestein_plan_64(n);
+    fft_real_bluestein_f64_with_plan(input, output, work, &bluestein);
 }
 
 #[cfg(test)]

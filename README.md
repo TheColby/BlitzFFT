@@ -423,6 +423,14 @@ blitzfft --list-precisions
 blitzfft --list-formats
 ```
 
+### Run the parallel Python reference CLI
+
+```bash
+python3 scripts/blitzfft_parallel.py --generate-sine 440,48000,0.05 --summary --format none
+```
+
+The Python script in `scripts/blitzfft_parallel.py` is a dependency-light framed-analysis reference path. It uses a pure-Python radix-2 FFT and prefers process parallelism, but it automatically falls back to a thread executor on restricted systems where process pools are unavailable.
+
 ### Standard framed analysis
 
 ```bash
