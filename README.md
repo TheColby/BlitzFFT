@@ -62,6 +62,7 @@ The whole-file path is different. It treats the entire waveform as one signal an
 
 - The CPU framed backend now uses the native BlitzFFT engine instead of materializing a full complex `RustFFT` input buffer for every frame.
 - Framed results no longer allocate an unused full complex spectrum for each frame.
+- The framed `f32` CPU path can batch pairs of real frames by packing one frame into the complex real lane and the next frame into the imaginary lane, then recovering both real spectra from one complex FFT.
 - The native `f64` power-of-two CPU FFT path now uses SIMD butterflies on supported `x86_64` and `aarch64` machines.
 - The repo now has an exact whole-file benchmark path for long real-valued signals, including non-power-of-two lengths.
 - The default whole-file benchmark compares three native-Rust paths side by side: `BlitzFFT native`, `RealFFT`, and `RustFFT complex`.
@@ -212,6 +213,26 @@ A real-input FFT avoids most of that waste. In practical terms, that can mean:
 - a cleaner API for audio workloads
 
 `RealFFT` in Rust builds on `RustFFT` but exposes the real-to-complex path directly. `FFTW3f`, `KissFFT`, and `PocketFFT` also provide real-input transforms. This repo makes that comparison explicit.
+
+### Paired real-frame batching
+
+For framed `f32` CPU analysis, BlitzFFT also uses a related two-real-FFTs-in-one-complex-FFT trick. Given two real frames `a[n]` and `b[n]`, the CPU backend packs them as:
+
+```math
+z[n] = a[n] + i b[n]
+```
+
+It then computes one complex FFT and recovers the two real spectra with conjugate symmetry:
+
+```math
+A[k] = \frac{Z[k] + \overline{Z[N-k]}}{2}
+```
+
+```math
+B[k] = \frac{Z[k] - \overline{Z[N-k]}}{2i}
+```
+
+This does not make the whole pipeline twice as fast, because packing, unpacking, magnitudes, memory traffic, and output still cost time. It does reduce transform scheduling overhead for frame-heavy workloads and keeps the all-real signal structure explicit in the native CPU backend.
 
 ## How BlitzFFT uses FFTs
 

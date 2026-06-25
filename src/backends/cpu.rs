@@ -49,6 +49,29 @@ fn with_work32<R>(plan: &Arc<BlitzFftPlan>, f: impl FnOnce(&mut WorkBuf32) -> R)
     })
 }
 
+struct PairWorkBuf32 {
+    fft_size: usize,
+    complex: Vec<Complex32>,
+}
+
+thread_local! {
+    static PAIR_WORK32: RefCell<Option<PairWorkBuf32>> = const { RefCell::new(None) };
+}
+
+fn with_pair_work32<R>(fft_size: usize, f: impl FnOnce(&mut PairWorkBuf32) -> R) -> R {
+    PAIR_WORK32.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let needs_reset = guard.as_ref().map_or(true, |w| w.fft_size != fft_size);
+        if needs_reset {
+            *guard = Some(PairWorkBuf32 {
+                fft_size,
+                complex: vec![Complex32::new(0.0, 0.0); fft_size],
+            });
+        }
+        f(guard.as_mut().unwrap())
+    })
+}
+
 // ─── f64 thread-local work buffers ───────────────────────────────────────────
 
 struct WorkBuf64 {
@@ -82,48 +105,128 @@ fn with_work64<R>(plan: &Arc<BlitzFftPlan64>, f: impl FnOnce(&mut WorkBuf64) -> 
 
 // ─── Public compute functions ─────────────────────────────────────────────────
 
+fn compute_single_f32_frame(
+    plan: &Arc<BlitzFftPlan>,
+    frame_index: usize,
+    frame: &[f32],
+    fft_size: usize,
+) -> Result<FftFrame> {
+    with_work32(plan, |work| {
+        let len = frame.len().min(fft_size);
+        let WorkBuf32 {
+            input,
+            input_len,
+            scratch,
+            output,
+            ..
+        } = work;
+        let input = if len == fft_size {
+            &frame[..fft_size]
+        } else {
+            input[..len].copy_from_slice(&frame[..len]);
+            if *input_len > len {
+                input[len..*input_len].fill(0.0);
+            }
+            *input_len = len;
+            &input[..]
+        };
+
+        plan.fft_real(input, scratch, output);
+
+        let magnitude = output
+            .iter()
+            .map(|c| (c.re * c.re + c.im * c.im).sqrt())
+            .collect();
+
+        Ok(FftFrame {
+            frame_index,
+            magnitude,
+        })
+    })
+}
+
+fn compute_paired_f32_frames(
+    pair_plan: &Arc<BlitzFftPlan>,
+    first_index: usize,
+    first: &[f32],
+    second: &[f32],
+    fft_size: usize,
+) -> Result<[FftFrame; 2]> {
+    with_pair_work32(fft_size, |work| {
+        for (index, slot) in work.complex.iter_mut().enumerate() {
+            let re = first.get(index).copied().unwrap_or(0.0);
+            let im = second.get(index).copied().unwrap_or(0.0);
+            *slot = Complex32::new(re, im);
+        }
+
+        pair_plan.fft_pow2_inplace(&mut work.complex);
+
+        let half1 = fft_size / 2 + 1;
+        let mut first_magnitude = Vec::with_capacity(half1);
+        let mut second_magnitude = Vec::with_capacity(half1);
+
+        for bin in 0..half1 {
+            let mirror = if bin == 0 { 0 } else { fft_size - bin };
+            let forward = work.complex[bin];
+            let mirrored = work.complex[mirror].conj();
+
+            let first_bin = Complex32::new(
+                (forward.re + mirrored.re) * 0.5,
+                (forward.im + mirrored.im) * 0.5,
+            );
+            let diff = Complex32::new(forward.re - mirrored.re, forward.im - mirrored.im);
+            let second_bin = Complex32::new(diff.im * 0.5, -diff.re * 0.5);
+
+            first_magnitude
+                .push((first_bin.re * first_bin.re + first_bin.im * first_bin.im).sqrt());
+            second_magnitude
+                .push((second_bin.re * second_bin.re + second_bin.im * second_bin.im).sqrt());
+        }
+
+        Ok([
+            FftFrame {
+                frame_index: first_index,
+                magnitude: first_magnitude,
+            },
+            FftFrame {
+                frame_index: first_index + 1,
+                magnitude: second_magnitude,
+            },
+        ])
+    })
+}
+
 /// Compute a batch of f32 frames in parallel using the native BlitzFFT engine.
 pub fn compute_batch_f32_native(frames: &[&[f32]], fft_size: usize) -> Result<Vec<FftFrame>> {
     let plan = get_plan(fft_size);
+    let pair_plan = get_plan(fft_size * 2);
 
-    frames
-        .par_iter()
+    let grouped = frames
+        .par_chunks(2)
         .enumerate()
-        .map(|(i, frame)| {
-            with_work32(&plan, |work| {
-                let len = frame.len().min(fft_size);
-                let WorkBuf32 {
-                    input,
-                    input_len,
-                    scratch,
-                    output,
-                    ..
-                } = work;
-                let input = if len == fft_size {
-                    &frame[..fft_size]
-                } else {
-                    input[..len].copy_from_slice(&frame[..len]);
-                    if *input_len > len {
-                        input[len..*input_len].fill(0.0);
-                    }
-                    *input_len = len;
-                    &input[..]
-                };
-
-                plan.fft_real(input, scratch, output);
-
-                let magnitude = output
-                    .iter()
-                    .map(|c| (c.re * c.re + c.im * c.im).sqrt())
-                    .collect();
-
-                Ok(FftFrame {
-                    frame_index: i,
-                    magnitude,
-                })
-            })
+        .map(|(pair_index, chunk)| {
+            let first_index = pair_index * 2;
+            if chunk.len() == 2 {
+                let [first, second] = compute_paired_f32_frames(
+                    &pair_plan,
+                    first_index,
+                    chunk[0],
+                    chunk[1],
+                    fft_size,
+                )?;
+                Ok(vec![first, second])
+            } else {
+                Ok(vec![compute_single_f32_frame(
+                    &plan,
+                    first_index,
+                    chunk[0],
+                    fft_size,
+                )?])
+            }
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(grouped.into_iter().flatten().collect())
 }
 
 /// Compute a batch of f64 frames using the native BlitzFFT f64 engine.
@@ -261,10 +364,58 @@ impl CpuFftBackend {
 
 impl FftBackend for CpuFftBackend {
     fn name(&self) -> &str {
-        "BlitzFFT native (CPU — precomputed twiddles + SIMD, Rayon parallel)"
+        "BlitzFFT native (CPU — paired real-frame batching + SIMD, Rayon parallel)"
     }
 
     fn compute_batch(&self, frames: &[&[f32]], fft_size: usize) -> Result<Vec<FftFrame>> {
         compute_batch_f32_native(frames, fft_size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_batch_f32_native;
+    use crate::blitz_fft::get_plan;
+    use num_complex::Complex32;
+
+    fn reference_magnitude(frame: &[f32]) -> Vec<f32> {
+        let plan = get_plan(frame.len());
+        let mut scratch = vec![Complex32::new(0.0, 0.0); frame.len() / 2];
+        let mut output = vec![Complex32::new(0.0, 0.0); frame.len() / 2 + 1];
+        plan.fft_real(frame, &mut scratch, &mut output);
+        output
+            .iter()
+            .map(|bin| (bin.re * bin.re + bin.im * bin.im).sqrt())
+            .collect()
+    }
+
+    #[test]
+    fn paired_real_frame_batch_matches_single_frame_reference() {
+        let frames = [
+            vec![0.25, -1.0, 0.5, 0.75, -0.125, 0.0, 1.5, -0.25],
+            vec![1.0, 0.5, -0.25, 0.125, -0.75, 0.3, 0.2, -0.4],
+            vec![0.0, 0.2, 0.4, -0.6, 0.8, -1.0, 0.1, -0.3],
+        ];
+        let refs: Vec<&[f32]> = frames.iter().map(Vec::as_slice).collect();
+
+        let actual = compute_batch_f32_native(&refs, 8).expect("paired batch should compute");
+
+        assert_eq!(actual.len(), frames.len());
+        for (frame_index, frame) in frames.iter().enumerate() {
+            assert_eq!(actual[frame_index].frame_index, frame_index);
+            let expected = reference_magnitude(frame);
+            assert_eq!(actual[frame_index].magnitude.len(), expected.len());
+            for (bin, (&actual, &expected)) in actual[frame_index]
+                .magnitude
+                .iter()
+                .zip(expected.iter())
+                .enumerate()
+            {
+                assert!(
+                    (actual - expected).abs() <= 1e-4,
+                    "frame {frame_index} bin {bin}: {actual} != {expected}"
+                );
+            }
+        }
     }
 }
