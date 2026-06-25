@@ -1,171 +1,188 @@
 # BlitzFFT Roadmap
 
-This roadmap is meant to keep the project honest and useful.
-It favors build reliability, correctness, and benchmark trust over flashy claims.
+This roadmap is meant to keep the repo ambitious without getting slippery.
+The project gets better when it becomes faster, easier to trust, and easier to build at the same time.
 
-## Principles
+## What "better" means here
 
-- The default build should stay native Rust and easy to install.
-- Optional backends and comparisons should be clearly opt-in.
-- Numerical claims should be backed by tests or explicitly labeled as modeled.
-- Benchmark output should optimize for trust, not spectacle.
-- Experimental precision modes should be treated as research features until proven otherwise.
+For BlitzFFT, "better" is not just one thing.
 
-## Near Term
+- Faster native Rust CPU kernels
+- More trustworthy correctness and benchmark claims
+- Cleaner defaults and a simpler install story
+- A CLI that feels like a real tool instead of only a benchmark harness
+- Clearer boundaries around experimental features such as `binary128`
 
-### 1. Ship a stable native-Rust baseline
+## Current diagnosis
 
-Goal: make `cargo build` and `cargo run` feel boring and dependable.
+The repo already has a good center:
 
-Work:
+- a native Rust CPU path
+- framed analysis plus exact whole-file benchmarking
+- optional foreign-library comparisons
+- explicit precision and backend choices
 
-- Keep the default build free of required FFTW, KISS FFT, and PocketFFT dependencies.
-- Keep `cuda`, `metal`, `fftw`, `kissfft`, `pocketfft`, and `binary128` behind explicit Cargo features.
-- Finish the remaining naming cleanup so all user-facing output consistently says `blitzfft`.
-- Add a short capability summary command such as `--list-backends` or `--version --verbose`.
+The main gaps are now more specific:
 
-Success looks like:
+- the native `f64` whole-file path is still meaningfully slower than `RealFFT`
+- the arbitrary-length Bluestein path still leaves speed on the table
+- some workflows still compute and store more spectrum data than they need
+- benchmark presentation is much better than before, but reproducibility can still tighten
+- the repo narrative is strong, but the README can do a better job of explaining priorities and tradeoffs
 
-- a new user can build and run the CPU path on stable Rust without hunting for external FFT libraries
-- optional comparison backends do not block the default install path
+## Near-term priorities
 
-### 2. Strengthen native FFT correctness coverage
+### 1. Make the native CPU engine materially faster
 
-Goal: make the native engine trustworthy across more sizes and inputs.
-
-Work:
-
-- Expand the unit tests in `src/blitz_fft.rs` beyond a few small reference vectors.
-- Add randomized comparisons against naive DFTs for very small sizes.
-- Add cross-checks against `rustfft` and `realfft` across power-of-two and awkward lengths.
-- Add regression tests for plan reuse, real-input packing/unpacking, and Bluestein edge cases.
-- Add explicit error tolerances for `f32` and `f64` modes.
-
-Success looks like:
-
-- the native engine has a clear, documented numerical envelope
-- correctness regressions are caught before benchmark work starts
-
-### 3. Make benchmark claims easier to trust
-
-Goal: keep benchmark output informative without implying more than the code can support.
+Goal: improve real throughput where BlitzFFT is trying to compete, not just benchmark harness cosmetics.
 
 Work:
 
-- Keep the default whole-file benchmark table limited to the native Rust comparison set.
-- Treat FFTW, KISS FFT, and PocketFFT as optional comparison layers, not as part of the core product.
-- Separate measured tables from simulated tables more clearly in the docs.
-- Keep peak-frequency estimates labeled as estimates, with conservative printed precision.
-- Add a reproducible benchmark script and record machine details alongside published numbers.
+- Add SIMD acceleration for the `f64` power-of-two butterflies.
+- Speed up the Bluestein inner FFT path, which is still scalar in important spots.
+- Keep reducing allocation and copy overhead in the native real-input paths.
+- Avoid materializing full magnitude vectors when the caller only needs summary peaks or top bins.
+- Measure framed and whole-file performance separately so kernel wins are visible.
 
 Success looks like:
 
-- readers can immediately tell what is measured, what is simulated, and what features were enabled
-- benchmark tables remain useful without looking like marketing
+- `BlitzFFT native (f64)` closes more of the gap to `RealFFT (f64)`
+- framed CPU throughput rises without widening correctness risk
+- awkward non-power-of-two lengths stop looking disproportionately expensive
 
-## Mid Term
+### 2. Tighten correctness around every speedup
 
-### 4. Make the CLI feel complete
-
-Goal: turn the repo from a promising benchmark harness into a reliable DSP tool.
+Goal: make each optimization safe to believe.
 
 Work:
 
-- Add capability-reporting flags such as `--list-backends`, `--list-precisions`, and `--list-formats`.
-- Improve error messages for feature-gated modes like `--precision 128`.
-- Add a machine-readable benchmark export mode for CI and scripting.
-- Add small example commands and expected outputs for the main workflows.
-- Consider adding a compact spectrogram export path or a stable JSON schema for analysis output.
+- Expand `src/blitz_fft.rs` tests beyond the current small reference vectors.
+- Add randomized small-size comparisons against naive DFTs.
+- Add more cross-checks against `rustfft` and `realfft`.
+- Add targeted regression tests for unpack math, plan reuse, and Bluestein edge cases.
+- Document expected numerical tolerances for `f32` and `f64`.
 
 Success looks like:
 
-- common tasks are discoverable from `--help`
-- scripting and regression tracking do not require scraping human-formatted tables
+- speed work lands with immediate numerical checks
+- regressions show up in tests before they show up in benchmark tables
 
-### 5. Reduce architectural risk in the native engine
+### 3. Keep the default build boring and dependable
 
-Goal: make the code easier to maintain and audit.
+Goal: make stable-Rust CPU usage the easiest path.
 
 Work:
 
-- Split `src/blitz_fft.rs` into smaller modules by concern: plan building, power-of-two kernels, arbitrary-length kernels, SIMD, and cache management.
-- Document the exact algorithm choices and fast paths in code, not just in the README.
-- Add comments only where they reduce real cognitive load, especially around packing/unpacking and Bluestein math.
-- Keep public APIs small and explicit.
+- Keep foreign-library comparisons fully optional.
+- Keep GPU backends additive instead of required.
+- Make capability reporting obvious from the CLI.
+- Keep CI validating the default native path first.
 
 Success looks like:
 
-- future optimization work does not require holding the whole file in your head at once
-- correctness reviews become much easier
+- new users can build and run the CPU tool without external FFT dependencies
+- optional backends never make the default path feel fragile
 
-## Long Term
+## Mid-term priorities
 
-### 6. Decide what `128-bit` means for this project
+### 4. Make the CLI smarter about work it does not need to do
 
-Goal: make the precision story deliberate instead of ambiguous.
+Goal: stop paying for data movement and formatting that the user did not ask for.
 
-There are two viable directions:
+Work:
 
-1. Keep `binary128` as an experimental nightly-only research path.
-2. Invest in a validated high-precision subsystem with serious tests, docs, and known limits.
-
-Questions to answer:
-
-- Is the main value scientific frequency estimation, or is it broad audio tooling?
-- Does the project want stable-Rust portability more than true `binary128`?
-- Should high precision remain CPU-only?
+- Add a summary-only fast path that does not store every frame's full magnitude vector.
+- Add a top-bin fast path that avoids formatting or serializing irrelevant bins.
+- Add machine-readable benchmark export for CI and scripted comparisons.
+- Keep output schemas stable enough for automation.
 
 Success looks like:
 
-- the docs and CLI make the tradeoff obvious
-- users know whether `128-bit` is a demo, a lab tool, or a supported mode
+- `--summary` and filtered-output workflows get faster
+- scripting no longer depends on scraping human-readable tables
 
-### 7. Decide how much GPU scope the repo should own
+### 5. Make benchmark claims easier to reproduce
 
-Goal: avoid half-supporting too many acceleration stories.
+Goal: make it obvious what is measured, what is simulated, and how to rerun it.
 
-Questions to answer:
+Work:
 
-- Is CPU-native BlitzFFT the flagship, with GPU backends as optional accelerators?
-- Or should CUDA and Metal become first-class supported products with their own validation and benchmark discipline?
-- Should foreign-library comparisons stay in this crate, or move to a benchmark-only companion crate?
+- Add a reproducible benchmark script that captures machine details.
+- Keep measured and simulated tables visually separate in the docs.
+- Record feature flags and precision mode alongside published results.
+- Add a short benchmark policy section explaining what counts as a fair comparison.
 
 Success looks like:
 
-- the repo has a clear center of gravity
-- maintenance effort matches the actual value each backend provides
+- readers can rerun the published workflow on their own machine
+- benchmark trust improves even when BlitzFFT is not yet the fastest entry
 
-## Recommended Release Shape
+### 6. Reduce complexity in the native engine layout
+
+Goal: make future optimization work easier to reason about.
+
+Work:
+
+- Split `src/blitz_fft.rs` by concern: plans, pow2 kernels, Bluestein, SIMD, and helpers.
+- Keep code comments focused on the non-obvious math and packing details.
+- Make hot-path ownership and scratch-buffer expectations explicit in the APIs.
+
+Success looks like:
+
+- performance work becomes easier to isolate and review
+- correctness review no longer requires holding one giant file in your head
+
+## Long-term decisions
+
+### 7. Decide how serious `binary128` should be
+
+The repo should eventually choose one of two honest stories:
+
+1. `binary128` stays a research-grade, nightly-only experiment.
+2. `binary128` becomes a validated subsystem with real tests, limits, and documented use cases.
+
+The project gets worse if it tries to sound production-grade without choosing.
+
+### 8. Decide how much GPU scope BlitzFFT really wants
+
+There are two healthy shapes here:
+
+1. CPU-native BlitzFFT is the flagship, with CUDA and Metal as optional accelerators.
+2. GPU backends become first-class supported surfaces with their own validation and benchmark discipline.
+
+The repo gets muddier if it tries to imply both without resourcing both.
+
+## Suggested release shape
 
 ### `v0.2`
 
 Focus:
 
-- stable native-Rust default build
-- stronger native FFT tests
-- cleaner benchmark honesty
-- more consistent naming and help output
+- faster native CPU kernels
+- stronger correctness coverage for the native engine
+- clearer benchmark reproducibility
+- README and CLI polish
 
 ### `v0.3`
 
 Focus:
 
-- better CLI ergonomics
-- reproducible benchmark tooling
+- summary/top-bin fast paths
+- benchmark export and scripting support
 - modularized native FFT implementation
 
 ### `v0.4`
 
 Focus:
 
-- deliberate decision on `binary128`
-- deliberate decision on long-term GPU scope
+- explicit `binary128` positioning
+- explicit long-term GPU positioning
 
-## Not Yet
+## Not the priority right now
 
-These are intentionally not top priority right now:
+These are tempting, but they are not the highest-leverage next moves:
 
-- chasing "fastest FFT" marketing claims
-- adding more optional comparison libraries before the native engine is better validated
-- expanding experimental precision modes before the stable path is rock solid
-- publishing more simulated benchmark tables without better reproducibility
+- adding more comparison libraries before the native engine improves
+- publishing more simulated mega-benchmark tables without better reproducibility
+- marketing "fastest FFT" claims before the native `f64` path closes more of the real gap
+- broadening experimental precision support before the stable paths are tighter

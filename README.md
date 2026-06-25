@@ -20,11 +20,13 @@ This repository is partly a tool and partly a notebook on FFT implementation tra
 
 - [Why this repo exists](#why-this-repo-exists)
 - [What changed recently](#what-changed-recently)
+- [How To Make It Better](#how-to-make-it-better)
 - [What an FFT is](#what-an-fft-is)
 - [Math conventions used in this repo](#math-conventions-used-in-this-repo)
 - [Why real-input FFTs matter](#why-real-input-ffts-matter)
 - [How BlitzFFT uses FFTs](#how-blitzfft-uses-ffts)
 - [Project architecture](#project-architecture)
+- [Install](#install)
 - [Build](#build)
 - [CLI](#cli)
 - [Examples](#examples)
@@ -60,10 +62,42 @@ The whole-file path is different. It treats the entire waveform as one signal an
 
 - The CPU framed backend now uses the native BlitzFFT engine instead of materializing a full complex `RustFFT` input buffer for every frame.
 - Framed results no longer allocate an unused full complex spectrum for each frame.
+- The native `f64` power-of-two CPU FFT path now uses SIMD butterflies on supported `x86_64` and `aarch64` machines.
 - The repo now has an exact whole-file benchmark path for long real-valued signals, including non-power-of-two lengths.
 - The default whole-file benchmark compares three native-Rust paths side by side: `BlitzFFT native`, `RealFFT`, and `RustFFT complex`.
 - Optional `FFTW3f`, `KissFFT`, and `PocketFFT` comparisons can be enabled explicitly with Cargo features.
 - The benchmark docs now center a simulated one-hour `384` kHz scenario using a `439.997` Hz sine and a full-signal Hann window.
+
+## How To Make It Better
+
+If we want BlitzFFT to become meaningfully better, the next work should stay focused on a few concrete themes.
+
+### 1. Make the native engine faster where it actually matters
+
+The biggest remaining speed opportunity is the native CPU FFT core, especially the `f64` whole-file path and the arbitrary-length Bluestein path. That means:
+
+- add stronger SIMD coverage for `f64`
+- keep reducing copies and scratch churn in the real-input kernels
+- improve the scalar Bluestein inner FFT path
+- stop doing full-spectrum work when the caller only asked for summary peaks or top bins
+
+### 2. Keep every speed claim tied to correctness
+
+This repo gets better when optimizations come with tests, not just faster tables. The native engine needs broader randomized checks, more cross-validation against `rustfft` and `realfft`, and clearer documented tolerances for `f32` and `f64`.
+
+### 3. Keep the default build simple
+
+The default story should remain: stable Rust, native CPU path, no required foreign FFT libraries. Optional GPU and comparison backends are valuable, but they should stay optional enough that the core tool remains easy to build and trust.
+
+### 4. Make the CLI do less unnecessary work
+
+Some workflows only need a peak summary, a few top bins, or a machine-readable benchmark row. Those paths should not have to pay for full magnitude storage and formatting when the user did not ask for it.
+
+### 5. Make benchmark docs even easier to trust
+
+The benchmark presentation is much stronger now than it used to be, but the repo still improves when it makes measured versus simulated results unmistakable, records feature flags and machine details, and ships a reproducible benchmark workflow.
+
+The longer-form plan lives in [ROADMAP.md](ROADMAP.md).
 
 ## What an FFT is
 
@@ -73,15 +107,15 @@ The DFT takes a finite list of samples and rewrites it as a sum of discrete comp
 
 For a length-$N$ signal $x[n]$, the forward DFT is
 
-$$
+```math
 X[k] = \sum_{n=0}^{N-1} x[n] e^{-j 2 \pi k n / N}, \qquad 0 \le k < N
-$$
+```
 
 and the inverse DFT is
 
-$$
+```math
 x[n] = \frac{1}{N} \sum_{k=0}^{N-1} X[k] e^{j 2 \pi k n / N}
-$$
+```
 
 If you implement that definition directly, it costs $O(N^2)$ operations. The FFT family of algorithms computes the same result in roughly $O(N \log N)$ time by factoring the problem into smaller transforms.
 
@@ -99,15 +133,15 @@ Some quick intuition helps:
 
 The bin frequencies are
 
-$$
+```math
 f_k = \frac{k f_s}{N}
-$$
+```
 
 where $f_s$ is the sample rate. The frequency resolution is therefore
 
-$$
+```math
 \Delta f = \frac{f_s}{N}
-$$
+```
 
 This is why a one-hour signal at $48{,}000$ Hz has extremely fine bin spacing: the observation interval is very long, so the frequency grid is correspondingly dense.
 
@@ -127,9 +161,9 @@ Different libraries package those ideas differently. Some are tiny and simple. O
 
 `BlitzFFT` follows the standard forward-transform sign convention with a negative exponential:
 
-$$
+```math
 e^{-j 2 \pi k n / N}
-$$
+```
 
 Some practical conventions matter when you compare FFT libraries:
 
@@ -139,21 +173,21 @@ Some practical conventions matter when you compare FFT libraries:
 
 For a real signal,
 
-$$
+```math
 X[N-k] = \overline{X[k]}
-$$
+```
 
 so a real-input forward FFT only needs to return the nonnegative-frequency half-spectrum:
 
-$$
+```math
 k = 0, 1, \dots, \left\lfloor \frac{N}{2} \right\rfloor
-$$
+```
 
 That is why the positive-frequency output length is
 
-$$
+```math
 \frac{N}{2} + 1
-$$
+```
 
 for even $N$.
 
@@ -196,17 +230,17 @@ The framed path is an STFT-style workflow:
 
 For frame index $m$, hop size $H$, and frame length $N$, the transform is
 
-$$
+```math
 X_m[k] = \sum_{n=0}^{N-1} x[n + mH] \, w[n] \, e^{-j 2 \pi k n / N}
-$$
+```
 
 where $w[n]$ is the analysis window.
 
 The Hann window used in this repo is
 
-$$
+```math
 w[n] = \frac{1}{2} \left(1 - \cos\left(\frac{2 \pi n}{N - 1}\right)\right), \qquad 0 \le n < N
-$$
+```
 
 In the CPU framed backend, the transform work is done with cached native BlitzFFT plans plus thread-local work buffers. On Apple hardware, the Metal backend applies the frame window on-device. On NVIDIA systems, the CUDA backend is preferred when enabled and available.
 
@@ -214,17 +248,17 @@ In the CPU framed backend, the transform work is done with cached native BlitzFF
 
 The whole-file mode computes one forward FFT over the entire signal:
 
-$$
+```math
 X[k] = \sum_{n=0}^{N-1} x[n] e^{-j 2 \pi k n / N}
-$$
+```
 
 This is not an STFT. There is no hop size and no time-local frame index. You get one spectrum covering the full observation interval.
 
 That is why the reported frequency resolution for the one-hour example is
 
-$$
+```math
 \Delta f = \frac{384000}{1382400000} = \frac{1}{3600} \approx 0.0002777778 \text{ Hz}
-$$
+```
 
 This mode exists to compare transform engines and data-motion costs, not to provide time-local spectral evolution.
 
@@ -232,21 +266,21 @@ This mode exists to compare transform engines and data-motion costs, not to prov
 
 The value above is a linear frequency-bin spacing in hertz. If, separately, you want to think about a similarly sized interval in logarithmic pitch space, take
 
-$$
+```math
 \Delta = 0.0002777778
-$$
+```
 
 interpreted as a base-2 log-frequency interval. The corresponding frequency ratio is
 
-$$
+```math
 \text{ratio} = 2^{0.0002777778} \approx 1.0001925
-$$
+```
 
 A cent, written `¢`, is one hundredth of a semitone, or `1/1200` of an octave. The equivalent size here is
 
-$$
+```math
 1200 \cdot 0.0002777778 = 0.33333336 \, \text{¢}
-$$
+```
 
 So that target interval is approximately:
 
@@ -255,29 +289,29 @@ So that target interval is approximately:
 
 It is also exactly one step of `3600-EDO`, since
 
-$$
+```math
 \frac{1200}{3600} = \frac{1}{3} \, \text{¢}
-$$
+```
 
 per equal division of the octave.
 
 This is smaller than the usual named commas in tuning theory. A useful nearby reference is one sixth of a schisma. Using
 
-$$
+```math
 \text{schisma} \approx 1.95 \, \text{¢}
-$$
+```
 
 gives
 
-$$
+```math
 \frac{1.95}{6} \approx 0.325 \, \text{¢}
-$$
+```
 
 so
 
-$$
+```math
 \frac{1}{6}\text{ schisma} \approx 0.325 \, \text{¢}
-$$
+```
 
 which is very close to `0.3333 ¢`, with an error of about `0.008 ¢`.
 
@@ -332,6 +366,31 @@ The benchmark table compares closely related but not identical implementation st
 That means the benchmark is not just "algorithm A versus algorithm B". It is also measuring planning policy, data layout policy, and buffer-management style.
 
 When `--precision 64` is selected, the whole-file benchmark currently uses the CPU-side `RealFFT` and `RustFFT` double-precision paths plus the repo's reusable native real-input path. The optional `PocketFFT`, `KissFFT`, and `FFTW3f` comparisons remain single-precision-only in this codebase today.
+
+## Install
+
+### Homebrew
+
+BlitzFFT ships a head-only Homebrew formula in this repository. Until the project has tagged release tarballs, install the current `main` branch with:
+
+```bash
+brew install --HEAD ./Formula/blitzfft.rb
+```
+
+From outside a clone, you can install directly from the public formula URL:
+
+```bash
+brew install --HEAD https://raw.githubusercontent.com/TheColby/BlitzFFT/main/Formula/blitzfft.rb
+```
+
+After installation:
+
+```bash
+blitzfft --list-backends
+blitzfft --generate-sine 440,48000,0.1 --summary -f none
+```
+
+The Homebrew formula builds the default native Rust CPU configuration. Optional comparison backends such as FFTW, KISS FFT, PocketFFT, CUDA, and Metal remain Cargo feature builds for now.
 
 ## Build
 
@@ -538,9 +597,9 @@ The benchmark asset is windowed across the **entire** one-hour signal before the
 
 The full-signal Hann is
 
-$$
+```math
 w[n] = \frac{1}{2} \left(1 - \cos\left(\frac{2 \pi n}{N - 1}\right)\right)
-$$
+```
 
 applied for $0 \le n < N$ across the entire loaded or synthesized waveform.
 
@@ -553,15 +612,15 @@ Updated on `2026-04-01` for a mono $384$ kHz, `32-bit` float, one-hour sine-wave
 - samples: `1,382,400,000`
 - frequency resolution:
 
-$$
+```math
 \Delta f = \frac{384000}{1382400000} = \frac{1}{3600} \approx 0.0002777778 \text{ Hz}
-$$
+```
 
 - nearest-bin frequency to the target sine:
 
-$$
+```math
 f_{\text{peak}} = \frac{1{,}583{,}989}{3600} \approx 439.996944444444 \text{ Hz}
-$$
+```
 
 - window: full-signal Hann window applied before the FFT
 - command: the reproduction command shown above
@@ -602,17 +661,17 @@ the interpolated peak estimates come out as:
 
 The simulated table above gives one exact-size anchor point at
 
-$$
+```math
 N_0 = 1{,}382{,}400{,}000
-$$
+```
 
 samples, or one hour of mono audio at $384$ kHz.
 
 To visualize how the whole-file execution time should grow as the FFT gets longer, the graph below extrapolates each algorithm's simulated `Exec` time with an $N \log_2 N$ model:
 
-$$
+```math
 \hat{T}(N) = T(N_0) \frac{N \log_2 N}{N_0 \log_2 N_0}
-$$
+```
 
 This is an **execution-time scaling estimate**, not a fresh measured benchmark at every duration. The one-hour `384` kHz anchor is itself simulated from the measured `48` kHz benchmark by the same $N \log_2 N$ model. It does not try to model planner heuristics, cache cliffs, allocator behavior, out-of-core I/O, or OS-level memory pressure for truly enormous transforms.
 
@@ -636,6 +695,8 @@ At the multi-day end of that estimate, the projected execution times at $384$ kH
 
 ```text
 BlitzFFT/
+|- Formula/
+|  `- blitzfft.rb
 |- data/
 |  `- generated benchmark WAVs (for example, a 384 kHz 60-minute sine asset; not checked in)
 |- src/

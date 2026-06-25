@@ -464,26 +464,15 @@ impl BlitzFftPlan {
             let neg_i_diff = Complex32::new(diff.im, -diff.re);
 
             let w = self.unpack[k];
-            let xk = Complex32::new(
-                even.re + w.re * neg_i_diff.re - w.im * neg_i_diff.im,
-                even.im + w.re * neg_i_diff.im + w.im * neg_i_diff.re,
+            let twist = Complex32::new(
+                w.re * neg_i_diff.re - w.im * neg_i_diff.im,
+                w.re * neg_i_diff.im + w.im * neg_i_diff.re,
             );
-            output[k] = xk;
+            output[k] = Complex32::new(even.re + twist.re, even.im + twist.im);
 
             // X[M-k] (only if distinct from X[k])
             if m - k != k {
-                let zk2 = zmk;
-                let zmk2_conj = Complex32::new(zk.re, -zk.im);
-                let even2 =
-                    Complex32::new((zk2.re + zmk2_conj.re) * 0.5, (zk2.im + zmk2_conj.im) * 0.5);
-                let diff2 =
-                    Complex32::new((zk2.re - zmk2_conj.re) * 0.5, (zk2.im - zmk2_conj.im) * 0.5);
-                let neg_i_diff2 = Complex32::new(diff2.im, -diff2.re);
-                let w2 = self.unpack[m - k];
-                output[m - k] = Complex32::new(
-                    even2.re + w2.re * neg_i_diff2.re - w2.im * neg_i_diff2.im,
-                    even2.im + w2.re * neg_i_diff2.im + w2.im * neg_i_diff2.re,
-                );
+                output[m - k] = Complex32::new(even.re - twist.re, twist.im - even.im);
             }
         }
     }
@@ -729,6 +718,111 @@ impl BlitzFftPlan64 {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    #[target_feature(enable = "neon")]
+    unsafe fn butterfly_stage_neon(
+        twiddles: &[Complex64],
+        buf: &mut [Complex64],
+        step: usize,
+        m: usize,
+    ) {
+        use std::arch::aarch64::*;
+
+        let half = step >> 1;
+        let stride = m / step;
+        let sign_mask: [f64; 2] = [-0.0, 0.0];
+        let vsign = vld1q_f64(sign_mask.as_ptr());
+
+        let mut start = 0usize;
+        while start < m {
+            let mut k = 0usize;
+            while k < half {
+                let w = twiddles[k * stride];
+                let ai = start + k;
+                let bi = start + k + half;
+
+                let a_vec = vld1q_f64(buf.as_ptr().add(ai) as *const f64);
+                let b_vec = vld1q_f64(buf.as_ptr().add(bi) as *const f64);
+                let w_re = vdupq_n_f64(w.re);
+                let w_im = vdupq_n_f64(w.im);
+                let b_swap = vextq_f64(b_vec, b_vec, 1);
+                let t1 = vmulq_f64(w_re, b_vec);
+                let t2 = vmulq_f64(w_im, b_swap);
+                let t2_adj = vreinterpretq_f64_u64(veorq_u64(
+                    vreinterpretq_u64_f64(t2),
+                    vreinterpretq_u64_f64(vsign),
+                ));
+                let twisted = vaddq_f64(t1, t2_adj);
+                let out_a = vaddq_f64(a_vec, twisted);
+                let out_b = vsubq_f64(a_vec, twisted);
+
+                vst1q_f64(buf.as_mut_ptr().add(ai) as *mut f64, out_a);
+                vst1q_f64(buf.as_mut_ptr().add(bi) as *mut f64, out_b);
+
+                k += 1;
+            }
+
+            start += step;
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn butterfly_stage_avx2(
+        twiddles: &[Complex64],
+        buf: &mut [Complex64],
+        step: usize,
+        m: usize,
+    ) {
+        use std::arch::x86_64::*;
+
+        let half = step >> 1;
+        let stride = m / step;
+        let sign_mask = _mm256_setr_pd(-0.0, 0.0, -0.0, 0.0);
+
+        let mut start = 0usize;
+        while start < m {
+            let mut k = 0usize;
+
+            while k + 1 < half {
+                let w0 = twiddles[k * stride];
+                let w1 = twiddles[(k + 1) * stride];
+                let ai = start + k;
+                let bi = start + k + half;
+
+                let a_vec = _mm256_loadu_pd(buf.as_ptr().add(ai) as *const f64);
+                let b_vec = _mm256_loadu_pd(buf.as_ptr().add(bi) as *const f64);
+                let w_re = _mm256_setr_pd(w0.re, w0.re, w1.re, w1.re);
+                let w_im = _mm256_setr_pd(w0.im, w0.im, w1.im, w1.im);
+                let b_swap = _mm256_permute_pd(b_vec, 0b0101);
+                let t1 = _mm256_mul_pd(w_re, b_vec);
+                let t2 = _mm256_mul_pd(w_im, b_swap);
+                let t2_adj = _mm256_xor_pd(t2, sign_mask);
+                let twisted = _mm256_add_pd(t1, t2_adj);
+                let out_a = _mm256_add_pd(a_vec, twisted);
+                let out_b = _mm256_sub_pd(a_vec, twisted);
+
+                _mm256_storeu_pd(buf.as_mut_ptr().add(ai) as *mut f64, out_a);
+                _mm256_storeu_pd(buf.as_mut_ptr().add(bi) as *mut f64, out_b);
+
+                k += 2;
+            }
+
+            while k < half {
+                let w = twiddles[k * stride];
+                let a = buf[start + k];
+                let b = buf[start + k + half];
+                let bw_re = w.re * b.re - w.im * b.im;
+                let bw_im = w.re * b.im + w.im * b.re;
+                buf[start + k] = Complex64::new(a.re + bw_re, a.im + bw_im);
+                buf[start + k + half] = Complex64::new(a.re - bw_re, a.im - bw_im);
+                k += 1;
+            }
+
+            start += step;
+        }
+    }
+
     pub fn fft_pow2_inplace(&self, buf: &mut [Complex64]) {
         debug_assert_eq!(buf.len(), self.m);
 
@@ -743,6 +837,23 @@ impl BlitzFftPlan64 {
         let twiddles = &self.twiddles;
         let mut step = 2usize;
         while step <= m {
+            #[cfg(target_arch = "aarch64")]
+            {
+                if step >= 4 {
+                    unsafe { Self::butterfly_stage_neon(twiddles, buf, step, m) };
+                } else {
+                    Self::butterfly_stage_scalar(twiddles, buf, step, m);
+                }
+            }
+            #[cfg(target_arch = "x86_64")]
+            {
+                if step >= 4 && is_x86_feature_detected!("avx2") {
+                    unsafe { Self::butterfly_stage_avx2(twiddles, buf, step, m) };
+                } else {
+                    Self::butterfly_stage_scalar(twiddles, buf, step, m);
+                }
+            }
+            #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
             Self::butterfly_stage_scalar(twiddles, buf, step, m);
             step <<= 1;
         }
@@ -777,25 +888,14 @@ impl BlitzFftPlan64 {
             let diff = Complex64::new((zk.re - zmk_conj.re) * 0.5, (zk.im - zmk_conj.im) * 0.5);
             let neg_i_diff = Complex64::new(diff.im, -diff.re);
             let w = self.unpack[k];
-            let xk = Complex64::new(
-                even.re + w.re * neg_i_diff.re - w.im * neg_i_diff.im,
-                even.im + w.re * neg_i_diff.im + w.im * neg_i_diff.re,
+            let twist = Complex64::new(
+                w.re * neg_i_diff.re - w.im * neg_i_diff.im,
+                w.re * neg_i_diff.im + w.im * neg_i_diff.re,
             );
-            output[k] = xk;
+            output[k] = Complex64::new(even.re + twist.re, even.im + twist.im);
 
             if m - k != k {
-                let zk2 = zmk;
-                let zmk2_conj = Complex64::new(zk.re, -zk.im);
-                let even2 =
-                    Complex64::new((zk2.re + zmk2_conj.re) * 0.5, (zk2.im + zmk2_conj.im) * 0.5);
-                let diff2 =
-                    Complex64::new((zk2.re - zmk2_conj.re) * 0.5, (zk2.im - zmk2_conj.im) * 0.5);
-                let neg_i_diff2 = Complex64::new(diff2.im, -diff2.re);
-                let w2 = self.unpack[m - k];
-                output[m - k] = Complex64::new(
-                    even2.re + w2.re * neg_i_diff2.re - w2.im * neg_i_diff2.im,
-                    even2.im + w2.re * neg_i_diff2.im + w2.im * neg_i_diff2.re,
-                );
+                output[m - k] = Complex64::new(even.re - twist.re, twist.im - even.im);
             }
         }
     }

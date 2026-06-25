@@ -67,3 +67,17 @@ jobs:
 
       - name: Test with foreign FFT comparisons
         run: cargo test --verbose --features foreign-fft
+
+  homebrew:
+    name: homebrew formula / macos
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check formula syntax
+        run: ruby -c Formula/blitzfft.rb
+
+      - name: Check formula style
+        run: brew style Formula/blitzfft.rb
