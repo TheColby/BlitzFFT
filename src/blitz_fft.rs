@@ -35,11 +35,13 @@ struct BlitzBluesteinPlan32 {
     conv_len: usize,
     chirp: Vec<Complex32>,
     kernel_fft: Vec<Complex32>,
+    inner: Box<BlitzFftPlan>,
 }
 
 impl BlitzBluesteinPlan32 {
     fn new(n: usize) -> Self {
         let conv_len = (2 * n - 1).next_power_of_two();
+        let inner = Box::new(BlitzFftPlan::new(2 * conv_len));
         let chirp: Vec<Complex32> = (0..n)
             .map(|k| {
                 let theta = -PI32 * (k * k % (2 * n)) as f32 / n as f32;
@@ -55,12 +57,13 @@ impl BlitzBluesteinPlan32 {
                 kernel_fft[conv_len - k] = c;
             }
         }
-        fft_pow2_scratch(&mut kernel_fft);
+        inner.fft_pow2_inplace(&mut kernel_fft);
 
         Self {
             conv_len,
             chirp,
             kernel_fft,
+            inner,
         }
     }
 }
@@ -69,11 +72,13 @@ struct BlitzBluesteinPlan64 {
     conv_len: usize,
     chirp: Vec<Complex64>,
     kernel_fft: Vec<Complex64>,
+    inner: Box<BlitzFftPlan64>,
 }
 
 impl BlitzBluesteinPlan64 {
     fn new(n: usize) -> Self {
         let conv_len = (2 * n - 1).next_power_of_two();
+        let inner = Box::new(BlitzFftPlan64::new(2 * conv_len));
         let chirp: Vec<Complex64> = (0..n)
             .map(|k| {
                 let theta = -PI64 * (k * k % (2 * n)) as f64 / n as f64;
@@ -89,12 +94,13 @@ impl BlitzBluesteinPlan64 {
                 kernel_fft[conv_len - k] = c;
             }
         }
-        fft_pow2_scratch_f64(&mut kernel_fft);
+        inner.fft_pow2_inplace(&mut kernel_fft);
 
         Self {
             conv_len,
             chirp,
             kernel_fft,
+            inner,
         }
     }
 }
@@ -500,7 +506,7 @@ impl BlitzFftPlan {
             *slot = Complex32::new(sample * chirp.re, sample * chirp.im);
         }
 
-        fft_pow2_scratch(work);
+        bluestein.inner.fft_pow2_inplace(work);
 
         for (slot, kernel) in work.iter_mut().zip(bluestein.kernel_fft.iter()) {
             let wr = slot.re;
@@ -513,7 +519,7 @@ impl BlitzFftPlan {
         for value in work.iter_mut() {
             *value = Complex32::new(value.re, -value.im);
         }
-        fft_pow2_scratch(work);
+        bluestein.inner.fft_pow2_inplace(work);
         let scale = 1.0 / bluestein.conv_len as f32;
         for value in work.iter_mut() {
             *value = Complex32::new(value.re * scale, -value.im * scale);
@@ -562,53 +568,6 @@ impl BlitzFftPlan {
     }
 }
 
-// ── Stand-alone power-of-two in-place FFT (no plan struct) ────────────────────
-// Used internally by Bluestein as the inner FFT.
-
-fn fft_pow2_scratch(buf: &mut [Complex32]) {
-    let m = buf.len();
-    debug_assert!(m.is_power_of_two());
-    if m <= 1 {
-        return;
-    }
-
-    let log2m = m.trailing_zeros();
-
-    // Bit-reversal.
-    for i in 0..m as u32 {
-        let r = i.reverse_bits() >> (32 - log2m);
-        if r > i {
-            buf.swap(i as usize, r as usize);
-        }
-    }
-
-    // Butterfly stages (scalar — Bluestein inner sizes may not be audio-sized).
-    let mut step = 2usize;
-    while step <= m {
-        let half = step >> 1;
-        let angle = -PI32 * 2.0 / step as f32;
-        let w_step = Complex32::new(angle.cos(), angle.sin());
-
-        let mut start = 0;
-        while start < m {
-            let mut w = Complex32::new(1.0, 0.0);
-            for k in 0..half {
-                let a = buf[start + k];
-                let b = buf[start + k + half];
-                let bw = Complex32::new(w.re * b.re - w.im * b.im, w.re * b.im + w.im * b.re);
-                buf[start + k] = Complex32::new(a.re + bw.re, a.im + bw.im);
-                buf[start + k + half] = Complex32::new(a.re - bw.re, a.im - bw.im);
-                w = Complex32::new(
-                    w.re * w_step.re - w.im * w_step.im,
-                    w.re * w_step.im + w.im * w_step.re,
-                );
-            }
-            start += step;
-        }
-        step <<= 1;
-    }
-}
-
 // ─── f64 Plan ─────────────────────────────────────────────────────────────────
 
 /// Pre-planned FFT for a specific size N (f64 precision).
@@ -635,7 +594,7 @@ fn fft_real_bluestein_f64_with_plan(
         *slot = Complex64::new(sample * chirp.re, sample * chirp.im);
     }
 
-    fft_pow2_scratch_f64(work);
+    plan.inner.fft_pow2_inplace(work);
 
     for (slot, kernel) in work.iter_mut().zip(plan.kernel_fft.iter()) {
         let wr = slot.re;
@@ -648,7 +607,7 @@ fn fft_real_bluestein_f64_with_plan(
     for value in work.iter_mut() {
         *value = Complex64::new(value.re, -value.im);
     }
-    fft_pow2_scratch_f64(work);
+    plan.inner.fft_pow2_inplace(work);
     let scale = 1.0 / plan.conv_len as f64;
     for value in work.iter_mut() {
         *value = Complex64::new(value.re * scale, -value.im * scale);
@@ -901,46 +860,6 @@ impl BlitzFftPlan64 {
     }
 }
 
-// ─── Standalone f64 power-of-two FFT (for Bluestein inner convolution) ────────
-
-fn fft_pow2_scratch_f64(buf: &mut [Complex64]) {
-    let m = buf.len();
-    debug_assert!(m.is_power_of_two());
-    if m <= 1 {
-        return;
-    }
-    let log2m = m.trailing_zeros();
-    for i in 0..m as u32 {
-        let r = i.reverse_bits() >> (32 - log2m);
-        if r > i {
-            buf.swap(i as usize, r as usize);
-        }
-    }
-    let mut step = 2usize;
-    while step <= m {
-        let half = step >> 1;
-        let angle = -PI64 * 2.0 / step as f64;
-        let w_step = Complex64::new(angle.cos(), angle.sin());
-        let mut start = 0;
-        while start < m {
-            let mut w = Complex64::new(1.0, 0.0);
-            for k in 0..half {
-                let a = buf[start + k];
-                let b = buf[start + k + half];
-                let bw = Complex64::new(w.re * b.re - w.im * b.im, w.re * b.im + w.im * b.re);
-                buf[start + k] = Complex64::new(a.re + bw.re, a.im + bw.im);
-                buf[start + k + half] = Complex64::new(a.re - bw.re, a.im - bw.im);
-                w = Complex64::new(
-                    w.re * w_step.re - w.im * w_step.im,
-                    w.re * w_step.im + w.im * w_step.re,
-                );
-            }
-            start += step;
-        }
-        step <<= 1;
-    }
-}
-
 // ─── Public helpers for arbitrary-length real FFT (used by whole_fft.rs) ──────
 
 /// Forward real-to-complex FFT for any N (f32).
@@ -1043,7 +962,10 @@ pub fn fft_real_arbitrary_f64_with_work(
 
 #[cfg(test)]
 mod tests {
-    use super::{fft_real_arbitrary_f32, fft_real_arbitrary_f64, get_plan, get_plan_64};
+    use super::{
+        bluestein_work_len_64, fft_real_arbitrary_f32, fft_real_arbitrary_f64,
+        fft_real_arbitrary_f64_with_work, get_plan, get_plan_64,
+    };
     use num_complex::{Complex32, Complex64};
     use std::sync::Arc;
 
@@ -1140,6 +1062,29 @@ mod tests {
         let expected = naive_rfft_f32(&input);
         assert_bins_close_f32(&output, &expected, 1e-3);
         assert_bins_close_f32(&fft_real_arbitrary_f32(&input), &expected, 1e-3);
+    }
+
+    #[test]
+    fn bluestein_reused_work_matches_naive_for_prime_and_composite_lengths() {
+        for n in [15, 31, 63, 127, 257] {
+            let input: Vec<f32> = (0..n)
+                .map(|i| ((i * i + 7 * i) as f32 * 0.137).sin())
+                .collect();
+            let plan = get_plan(n);
+            let mut work = vec![Complex32::new(0.0, 0.0); plan.bluestein_work_len()];
+            let mut output = vec![Complex32::new(0.0, 0.0); n / 2 + 1];
+            for _ in 0..2 {
+                plan.fft_real_with_work(&input, &mut output, &mut work);
+                assert_bins_close_f32(&output, &naive_rfft_f32(&input), 2e-3);
+            }
+            let input64: Vec<f64> = input.iter().copied().map(f64::from).collect();
+            let mut work64 = vec![Complex64::new(0.0, 0.0); bluestein_work_len_64(n)];
+            let mut output64 = vec![Complex64::new(0.0, 0.0); n / 2 + 1];
+            for _ in 0..2 {
+                fft_real_arbitrary_f64_with_work(&input64, &mut output64, &mut work64);
+                assert_bins_close_f64(&output64, &naive_rfft_f64(&input64), 1e-8);
+            }
+        }
     }
 
     #[test]

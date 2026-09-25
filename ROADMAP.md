@@ -26,11 +26,11 @@ The main gaps are now more specific:
 
 - the native `f64` whole-file path is still meaningfully slower than `RealFFT`
 - the arbitrary-length Bluestein path still leaves speed on the table
-- top-bin output still computes and stores more spectrum data than it needs
+- `binary128` and GPU spectrum output still store full per-frame magnitudes for top-bin requests
 - benchmark presentation is much better than before, but reproducibility can still tighten
 - the repo narrative is strong, but the README can do a better job of explaining priorities and tradeoffs
 
-Recent progress: Homebrew packaging, `f64` SIMD butterflies, paired real-frame batching, and a summary-only `f32` CPU path are implemented.
+Recent progress: Homebrew packaging, `f64` SIMD butterflies, paired real-frame batching, a summary-only `f32` CPU path, a bounded top-bin CPU path, a SIMD-backed Bluestein convolution, and a reproducible local benchmark runner are implemented.
 
 ## Near-term priorities
 
@@ -41,9 +41,9 @@ Goal: improve real throughput where BlitzFFT is trying to compete, not just benc
 Work:
 
 - Benchmark and tune the existing `f64` SIMD butterflies across supported CPUs.
-- Speed up the Bluestein inner FFT path, which is still scalar in important spots.
+- Measure and further tune the new SIMD-backed Bluestein inner FFT across awkward lengths.
 - Keep reducing allocation and copy overhead in the native real-input paths.
-- Extend the summary-only allocation savings to top-bin workflows.
+- Extend bounded spectrum output to other precisions and GPU backends where useful.
 - Measure framed and whole-file performance separately so kernel wins are visible.
 
 Success looks like:
@@ -94,7 +94,7 @@ Goal: stop paying for data movement and formatting that the user did not ask for
 Work:
 
 - Extend the `f32` CPU summary-only fast path to other precision modes where useful.
-- Add a top-bin fast path that avoids formatting or serializing irrelevant bins.
+- Profile the new top-bin path for small and large selection limits.
 - Add machine-readable benchmark export for CI and scripted comparisons.
 - Keep output schemas stable enough for automation.
 
@@ -109,7 +109,7 @@ Goal: make it obvious what is measured, what is simulated, and how to rerun it.
 
 Work:
 
-- Add a reproducible benchmark script that captures machine details.
+- Publish representative local measured artifacts alongside the reproducible runner.
 - Keep measured and simulated tables visually separate in the docs.
 - Record feature flags and precision mode alongside published results.
 - Add a short benchmark policy section explaining what counts as a fair comparison.
@@ -169,8 +169,8 @@ Focus:
 
 Focus:
 
-- top-bin and additional-precision fast paths
-- benchmark export and scripting support
+- additional-precision and GPU spectrum fast paths
+- benchmark artifact publication and scripting polish
 - modularized native FFT implementation
 
 ### `v0.4`

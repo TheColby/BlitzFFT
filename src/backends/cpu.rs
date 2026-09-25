@@ -8,13 +8,15 @@
 //             optional `binary128` feature is enabled).
 
 use std::cell::RefCell;
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use anyhow::Result;
 use num_complex::{Complex32, Complex64};
 use rayon::prelude::*;
 
-use super::{FftBackend, FftFrame, FftSummaryFrame};
+use super::{FftBackend, FftFrame, FftSelectedFrame, FftSummaryFrame};
 use crate::blitz_fft::{get_plan, get_plan_64, BlitzFftPlan, BlitzFftPlan64};
 use crate::quad::Quad;
 
@@ -332,6 +334,172 @@ pub fn compute_summary_batch_f32_native(
     Ok(grouped.into_iter().flatten().collect())
 }
 
+#[derive(Clone, Copy, PartialEq)]
+struct RankedBin {
+    bin: usize,
+    magnitude: f32,
+}
+
+impl Eq for RankedBin {}
+
+impl Ord for RankedBin {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.magnitude
+            .total_cmp(&other.magnitude)
+            .then_with(|| other.bin.cmp(&self.bin))
+    }
+}
+
+impl PartialOrd for RankedBin {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+struct TopBins {
+    limit: usize,
+    fft_size: usize,
+    sample_rate: u32,
+    min_hz: f32,
+    max_hz: f32,
+    heap: BinaryHeap<Reverse<RankedBin>>,
+}
+
+impl TopBins {
+    fn new(
+        limit: usize,
+        fft_size: usize,
+        sample_rate: u32,
+        min_hz: Option<f32>,
+        max_hz: Option<f32>,
+    ) -> Self {
+        Self {
+            limit,
+            fft_size,
+            sample_rate,
+            min_hz: min_hz.unwrap_or(0.0),
+            max_hz: max_hz.unwrap_or(f32::INFINITY),
+            heap: BinaryHeap::with_capacity(limit.min(fft_size / 2 + 1)),
+        }
+    }
+
+    fn push(&mut self, bin: usize, magnitude: f32) {
+        let hz = bin as f32 * self.sample_rate as f32 / self.fft_size as f32;
+        if hz < self.min_hz || hz > self.max_hz {
+            return;
+        }
+        let candidate = RankedBin { bin, magnitude };
+        if self.heap.len() < self.limit {
+            self.heap.push(Reverse(candidate));
+        } else if self
+            .heap
+            .peek()
+            .is_some_and(|weakest| candidate > weakest.0)
+        {
+            self.heap.pop();
+            self.heap.push(Reverse(candidate));
+        }
+    }
+
+    fn finish(self, frame_index: usize) -> FftSelectedFrame {
+        let mut bins: Vec<_> = self
+            .heap
+            .into_iter()
+            .map(|Reverse(bin)| (bin.bin, bin.magnitude))
+            .collect();
+        bins.sort_unstable_by_key(|(bin, _)| *bin);
+        FftSelectedFrame { frame_index, bins }
+    }
+}
+
+/// Compute a bounded set of bins per frame without storing full magnitudes.
+pub fn compute_top_batch_f32_native(
+    frames: &[&[f32]],
+    fft_size: usize,
+    sample_rate: u32,
+    limit: usize,
+    min_hz: Option<f32>,
+    max_hz: Option<f32>,
+) -> Vec<FftSelectedFrame> {
+    let plan = get_plan(fft_size);
+    let pair_plan = get_plan(fft_size * 2);
+    frames
+        .par_chunks(2)
+        .enumerate()
+        .map(|(pair_index, chunk)| {
+            let first_index = pair_index * 2;
+            if chunk.len() == 2 {
+                with_pair_work32(fft_size, |work| {
+                    for (index, slot) in work.complex.iter_mut().enumerate() {
+                        *slot = Complex32::new(
+                            chunk[0].get(index).copied().unwrap_or(0.0),
+                            chunk[1].get(index).copied().unwrap_or(0.0),
+                        );
+                    }
+                    pair_plan.fft_pow2_inplace(&mut work.complex);
+                    let mut first = TopBins::new(limit, fft_size, sample_rate, min_hz, max_hz);
+                    let mut second = TopBins::new(limit, fft_size, sample_rate, min_hz, max_hz);
+                    for bin in 0..=fft_size / 2 {
+                        let mirror = if bin == 0 { 0 } else { fft_size - bin };
+                        let forward = work.complex[bin];
+                        let mirrored = work.complex[mirror].conj();
+                        first.push(bin, ((forward + mirrored) * 0.5).norm());
+                        second.push(
+                            bin,
+                            ((forward - mirrored) * Complex32::new(0.0, -0.5)).norm(),
+                        );
+                    }
+                    vec![first.finish(first_index), second.finish(first_index + 1)]
+                })
+            } else {
+                vec![with_work32(&plan, |work| {
+                    let frame = chunk[0];
+                    let len = frame.len().min(fft_size);
+                    work.input[..len].copy_from_slice(&frame[..len]);
+                    work.input[len..].fill(0.0);
+                    plan.fft_real(&work.input, &mut work.scratch, &mut work.output);
+                    let mut top = TopBins::new(limit, fft_size, sample_rate, min_hz, max_hz);
+                    for (bin, value) in work.output.iter().enumerate() {
+                        top.push(bin, value.norm());
+                    }
+                    top.finish(first_index)
+                })]
+            }
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+pub fn compute_top_batch_f64_native(
+    frames: &[Vec<f64>],
+    fft_size: usize,
+    sample_rate: u32,
+    limit: usize,
+    min_hz: Option<f32>,
+    max_hz: Option<f32>,
+) -> Vec<FftSelectedFrame> {
+    let plan = get_plan_64(fft_size);
+    frames
+        .par_iter()
+        .enumerate()
+        .map(|(frame_index, frame)| {
+            with_work64(&plan, |work| {
+                let len = frame.len().min(fft_size);
+                work.input[..len].copy_from_slice(&frame[..len]);
+                work.input[len..].fill(0.0);
+                plan.fft_real_pow2(&work.input, &mut work.scratch, &mut work.output);
+                let mut top = TopBins::new(limit, fft_size, sample_rate, min_hz, max_hz);
+                for (bin, value) in work.output.iter().enumerate() {
+                    top.push(bin, value.norm() as f32);
+                }
+                top.finish(frame_index)
+            })
+        })
+        .collect()
+}
+
 /// Compute a batch of f64 frames using the native BlitzFFT f64 engine.
 pub fn compute_batch_f64(frames: &[Vec<f64>], fft_size: usize) -> Result<Vec<FftFrame>> {
     let plan = get_plan_64(fft_size);
@@ -477,7 +645,10 @@ impl FftBackend for CpuFftBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_batch_f32_native, compute_summary_batch_f32_native};
+    use super::{
+        compute_batch_f32_native, compute_batch_f64, compute_summary_batch_f32_native,
+        compute_top_batch_f32_native, compute_top_batch_f64_native,
+    };
     use crate::blitz_fft::get_plan;
     use num_complex::Complex32;
 
@@ -552,6 +723,53 @@ mod tests {
                 assert_eq!(summary.peak_bin, expected.map(|(bin, _)| bin));
                 if let Some((_, magnitude)) = expected {
                     assert!((summary.magnitude - magnitude).abs() < 1e-4);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn top_bins_match_full_spectrum_for_both_precisions() {
+        let frames = [
+            vec![0.25, -1.0, 0.5, 0.75, -0.125, 0.0, 1.5, -0.25],
+            vec![1.0, 0.5, -0.25, 0.125, -0.75, 0.3, 0.2, -0.4],
+            vec![0.0, 0.2, 0.4, -0.6, 0.8, -1.0, 0.1, -0.3],
+        ];
+        let refs: Vec<&[f32]> = frames.iter().map(Vec::as_slice).collect();
+        let frames64: Vec<Vec<f64>> = frames
+            .iter()
+            .map(|frame| frame.iter().map(|&v| v as f64).collect())
+            .collect();
+        let full32 = compute_batch_f32_native(&refs, 8).unwrap();
+        let full64 = compute_batch_f64(&frames64, 8).unwrap();
+        for (full, selected) in [
+            (
+                full32,
+                compute_top_batch_f32_native(&refs, 8, 8000, 2, Some(1000.0), Some(3000.0)),
+            ),
+            (
+                full64,
+                compute_top_batch_f64_native(&frames64, 8, 8000, 2, Some(1000.0), Some(3000.0)),
+            ),
+        ] {
+            for (frame, actual) in full.iter().zip(&selected) {
+                let mut expected: Vec<_> = frame
+                    .magnitude
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(bin, _)| (1..=3).contains(bin))
+                    .collect();
+                expected.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+                expected.truncate(2);
+                expected.sort_unstable_by_key(|(bin, _)| *bin);
+                assert_eq!(actual.frame_index, frame.frame_index);
+                assert_eq!(actual.bins.len(), expected.len());
+                for ((actual_bin, actual_mag), (expected_bin, expected_mag)) in
+                    actual.bins.iter().zip(expected)
+                {
+                    assert_eq!(*actual_bin, expected_bin);
+                    assert!((actual_mag - expected_mag).abs() < 1e-4);
                 }
             }
         }

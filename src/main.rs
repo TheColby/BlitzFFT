@@ -36,7 +36,10 @@ use audio::{
     window_coeffs_qd, write_wav_f32, ChannelSelection, ProcessingPrecision, WindowFunction,
 };
 use backends::select_backend;
-use output::{print_precomputed_summary, print_summary, write_frames, OutputFormat};
+use output::{
+    print_precomputed_summary, print_selected_summary, print_summary, write_frames,
+    write_selected_frames, OutputFormat,
+};
 use quad::Quad;
 
 // ── CLI definition ────────────────────────────────────────────────────────────
@@ -205,6 +208,33 @@ fn print_formats() {
     println!("  json  structured per-frame bins");
     println!("  bin   raw little-endian `f32` magnitudes (requires `--output`)");
     println!("  none  suppress frame output");
+}
+
+fn finish_selected_frames(
+    args: &Args,
+    frames: &[backends::FftSelectedFrame],
+    sample_rate: u32,
+    elapsed_ms: f64,
+) -> Result<()> {
+    eprintln!(
+        "  Done    : {:.2} ms total  ({:.1} μs/frame)",
+        elapsed_ms,
+        elapsed_ms * 1000.0 / frames.len() as f64
+    );
+    if args.summary {
+        println!();
+        println!("{}", "  Frame   Peak Freq     Magnitude".dimmed());
+        println!("{}", "  ──────────────────────────────".dimmed());
+        print_selected_summary(frames, args.fft_size, sample_rate);
+        println!();
+    }
+    write_selected_frames(
+        frames,
+        args.fft_size,
+        sample_rate,
+        args.format,
+        args.output.as_deref(),
+    )
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -440,6 +470,24 @@ fn main() -> Result<()> {
             hop,
             args.window
         );
+        if args.top_bins > 0
+            && matches!(
+                args.format,
+                OutputFormat::Text | OutputFormat::Csv | OutputFormat::Json
+            )
+        {
+            let selected = backends::cpu::compute_top_batch_f64_native(
+                &frames64,
+                args.fft_size,
+                sample_rate,
+                args.top_bins,
+                args.min_hz,
+                args.max_hz,
+            );
+            let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+            finish_selected_frames(&args, &selected, sample_rate, elapsed_ms)?;
+            return Ok(());
+        }
         let all_results = backends::cpu::compute_batch_f64(&frames64, args.fft_size)?;
         let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
         eprintln!(
@@ -465,6 +513,28 @@ fn main() -> Result<()> {
             let (gpu_res, cpu_res) =
                 benchmark::run(&backend, &frames, args.fft_size, args.bench_repeats)?;
             benchmark::print_table(&gpu_res, &cpu_res);
+            return Ok(());
+        }
+
+        if args.top_bins > 0
+            && !is_gpu
+            && matches!(
+                args.format,
+                OutputFormat::Text | OutputFormat::Csv | OutputFormat::Json
+            )
+        {
+            let refs: Vec<&[f32]> = frames.iter().map(Vec::as_slice).collect();
+            let t_start = Instant::now();
+            let selected = backends::cpu::compute_top_batch_f32_native(
+                &refs,
+                args.fft_size,
+                sample_rate,
+                args.top_bins,
+                args.min_hz,
+                args.max_hz,
+            );
+            let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+            finish_selected_frames(&args, &selected, sample_rate, elapsed_ms)?;
             return Ok(());
         }
 

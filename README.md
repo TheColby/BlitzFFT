@@ -64,6 +64,8 @@ The whole-file path is different. It treats the entire waveform as one signal an
 - Framed results no longer allocate an unused full complex spectrum for each frame.
 - The framed `f32` CPU path can batch pairs of real frames by packing one frame into the complex real lane and the next frame into the imaginary lane, then recovering both real spectra from one complex FFT.
 - The native `f64` power-of-two CPU FFT path now uses SIMD butterflies on supported `x86_64` and `aarch64` machines.
+- Bluestein's arbitrary-length convolution now reuses the native power-of-two SIMD plan and its precomputed twiddles.
+- CPU `--top-bins` output keeps only the requested bins per frame in `f32` and `f64` modes.
 - `--precision 32 --backend cpu --summary -f none` now scans peaks directly, avoiding per-frame magnitude arrays.
 - The repo now has an exact whole-file benchmark path for long real-valued signals, including non-power-of-two lengths.
 - The default whole-file benchmark compares three native-Rust paths side by side: `BlitzFFT native`, `RealFFT`, and `RustFFT complex`.
@@ -80,8 +82,8 @@ The biggest remaining speed opportunity is the native CPU FFT core, especially t
 
 - measure and tune the existing `f64` SIMD kernels
 - keep reducing copies and scratch churn in the real-input kernels
-- improve the scalar Bluestein inner FFT path
-- extend the summary-only memory savings to top-bin output
+- benchmark the new Bluestein inner plan across awkward lengths and tune it further
+- extend the summary and top-bin memory savings to other precisions and GPU backends
 
 ### 2. Keep every speed claim tied to correctness
 
@@ -93,7 +95,7 @@ The default story should remain: stable Rust, native CPU path, no required forei
 
 ### 4. Make the CLI do less unnecessary work
 
-The `f32` CPU path now computes peak summaries without storing every magnitude when using `--summary -f none`. Top-bin output and other precision modes remain opportunities to avoid unnecessary storage and formatting.
+The `f32` CPU path computes peak summaries without storing every magnitude when using `--summary -f none`. CPU `--top-bins` output uses bounded per-frame storage in `f32` and `f64` modes. Other precision modes and GPU backends remain opportunities to avoid unnecessary storage and formatting.
 
 ### 5. Make benchmark docs even easier to trust
 
@@ -583,6 +585,16 @@ cargo run --release -- input.wav --window blackman --min-hz 20 --max-hz 2000 --f
 ## Whole-file benchmark methodology
 
 This section matters because FFT benchmarks are easy to misread.
+
+### Reproduce measured comparisons
+
+The standard-library-only runner builds the release binary and records the Git commit, dirty-tree status, OS, architecture, CPU count, Rust toolchain, Cargo features, signal settings, exact CLI commands, and per-trial results in JSON:
+
+```bash
+python3 scripts/measure_whole_fft.py --precision 64 --sizes 1009 1024 4093 4096 65521 65536 --repeats 5 --trials 3 --output /tmp/blitzfft-measured.json
+```
+
+The default size pairs contrast awkward Bluestein lengths with nearby power-of-two lengths. Use `--precision 32` and optionally `--features foreign-fft` for other available comparisons. Every JSON row is a measurement on the local machine; it is not the simulated `384` kHz one-hour projection below. The runner uses an unwindowed synthetic sine and records separate setup and execution times. The CLI benchmark runs algorithms in a fixed order, so thermal state and cache effects can influence close results. For a published claim, retain the JSON artifact, use a clean commit, and report the median over trials with the hardware and feature flags.
 
 ### What is being timed
 

@@ -16,6 +16,12 @@ pub struct FftSummaryFrame {
     pub magnitude: f32,
 }
 
+#[derive(Debug)]
+pub struct FftSelectedFrame {
+    pub frame_index: usize,
+    pub bins: Vec<(usize, f32)>,
+}
+
 /// Common interface every backend must satisfy.
 pub trait FftBackend: Send + Sync {
     /// Human-readable name shown in CLI output.

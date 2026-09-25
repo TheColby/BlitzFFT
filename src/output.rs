@@ -8,6 +8,7 @@
 
 use anyhow::{anyhow, Result};
 use std::{
+    borrow::Cow,
     fs::File,
     io::{BufWriter, Write},
     path::Path,
@@ -15,7 +16,7 @@ use std::{
 
 use crate::{
     audio::{bin_to_hz, peak_bin},
-    backends::{FftFrame, FftSummaryFrame},
+    backends::{FftFrame, FftSelectedFrame, FftSummaryFrame},
 };
 
 /// How to write output.
@@ -97,9 +98,79 @@ pub fn write_frames(
     }
 }
 
-fn write_text(
+pub fn write_selected_frames(
+    frames: &[FftSelectedFrame],
+    fft_size: usize,
+    sample_rate: u32,
+    format: OutputFormat,
+    out_path: Option<&Path>,
+) -> Result<()> {
+    let mut w: Box<dyn Write> = match out_path {
+        Some(path) => Box::new(BufWriter::new(File::create(path)?)),
+        None => Box::new(BufWriter::new(std::io::stdout())),
+    };
+    match format {
+        OutputFormat::Text => write_text(&mut *w, frames, fft_size, sample_rate, 0, None, None),
+        OutputFormat::Csv => write_csv(&mut *w, frames, fft_size, sample_rate, 0, None, None),
+        OutputFormat::Json => write_json(&mut *w, frames, fft_size, sample_rate, 0, None, None),
+        _ => Err(anyhow!("selected bins require text, csv, or json output")),
+    }
+}
+
+trait SpectrumFrame {
+    fn frame_index(&self) -> usize;
+    fn bins(
+        &self,
+        fft_size: usize,
+        sample_rate: u32,
+        top_bins: usize,
+        min_hz: Option<f32>,
+        max_hz: Option<f32>,
+    ) -> Cow<'_, [(usize, f32)]>;
+}
+
+impl SpectrumFrame for FftFrame {
+    fn frame_index(&self) -> usize {
+        self.frame_index
+    }
+    fn bins(
+        &self,
+        fft_size: usize,
+        sample_rate: u32,
+        top_bins: usize,
+        min_hz: Option<f32>,
+        max_hz: Option<f32>,
+    ) -> Cow<'_, [(usize, f32)]> {
+        Cow::Owned(emit_bins(
+            &self.magnitude,
+            fft_size,
+            sample_rate,
+            top_bins,
+            min_hz,
+            max_hz,
+        ))
+    }
+}
+
+impl SpectrumFrame for FftSelectedFrame {
+    fn frame_index(&self) -> usize {
+        self.frame_index
+    }
+    fn bins(
+        &self,
+        _: usize,
+        _: u32,
+        _: usize,
+        _: Option<f32>,
+        _: Option<f32>,
+    ) -> Cow<'_, [(usize, f32)]> {
+        Cow::Borrowed(&self.bins)
+    }
+}
+
+fn write_text<F: SpectrumFrame>(
     w: &mut dyn Write,
-    frames: &[FftFrame],
+    frames: &[F],
     fft_size: usize,
     sample_rate: u32,
     top_bins: usize,
@@ -111,25 +182,25 @@ fn write_text(
     writeln!(w, "# frame | bin | freq_hz | magnitude")?;
 
     for f in frames {
-        let bins = emit_bins(
-            &f.magnitude,
-            fft_size,
-            sample_rate,
-            top_bins,
-            min_hz,
-            max_hz,
-        );
-        for (bin, mag) in bins {
+        let bins = f.bins(fft_size, sample_rate, top_bins, min_hz, max_hz);
+        for &(bin, mag) in bins.iter() {
             let hz = bin_to_hz(bin, fft_size, sample_rate);
-            writeln!(w, "{:6} {:6} {:10.2} {:12.6}", f.frame_index, bin, hz, mag)?;
+            writeln!(
+                w,
+                "{:6} {:6} {:10.2} {:12.6}",
+                f.frame_index(),
+                bin,
+                hz,
+                mag
+            )?;
         }
     }
     Ok(())
 }
 
-fn write_csv(
+fn write_csv<F: SpectrumFrame>(
     w: &mut dyn Write,
-    frames: &[FftFrame],
+    frames: &[F],
     fft_size: usize,
     sample_rate: u32,
     top_bins: usize,
@@ -138,25 +209,18 @@ fn write_csv(
 ) -> Result<()> {
     writeln!(w, "frame,bin,freq_hz,magnitude")?;
     for f in frames {
-        let bins = emit_bins(
-            &f.magnitude,
-            fft_size,
-            sample_rate,
-            top_bins,
-            min_hz,
-            max_hz,
-        );
-        for (bin, mag) in bins {
+        let bins = f.bins(fft_size, sample_rate, top_bins, min_hz, max_hz);
+        for &(bin, mag) in bins.iter() {
             let hz = bin_to_hz(bin, fft_size, sample_rate);
-            writeln!(w, "{},{},{:.4},{:.8}", f.frame_index, bin, hz, mag)?;
+            writeln!(w, "{},{},{:.4},{:.8}", f.frame_index(), bin, hz, mag)?;
         }
     }
     Ok(())
 }
 
-fn write_json(
+fn write_json<F: SpectrumFrame>(
     w: &mut dyn Write,
-    frames: &[FftFrame],
+    frames: &[F],
     fft_size: usize,
     sample_rate: u32,
     top_bins: usize,
@@ -165,16 +229,9 @@ fn write_json(
 ) -> Result<()> {
     writeln!(w, "[")?;
     for (frame_index, frame) in frames.iter().enumerate() {
-        let bins = emit_bins(
-            &frame.magnitude,
-            fft_size,
-            sample_rate,
-            top_bins,
-            min_hz,
-            max_hz,
-        );
+        let bins = frame.bins(fft_size, sample_rate, top_bins, min_hz, max_hz);
         writeln!(w, "  {{")?;
-        writeln!(w, "    \"frame\": {},", frame.frame_index)?;
+        writeln!(w, "    \"frame\": {},", frame.frame_index())?;
         writeln!(w, "    \"bins\": [")?;
         for (bin_index, (bin, mag)) in bins.iter().enumerate() {
             let hz = bin_to_hz(*bin, fft_size, sample_rate);
@@ -285,6 +342,24 @@ pub fn print_precomputed_summary(frames: &[FftSummaryFrame], fft_size: usize, sa
             println!(
                 "  frame {:>5}  peak      n/a  mag        n/a",
                 f.frame_index
+            );
+        }
+    }
+}
+
+pub fn print_selected_summary(frames: &[FftSelectedFrame], fft_size: usize, sample_rate: u32) {
+    for frame in frames {
+        if let Some(&(bin, magnitude)) = frame.bins.iter().max_by(|a, b| a.1.total_cmp(&b.1)) {
+            println!(
+                "  frame {:>5}  peak {:>7.1} Hz  mag {:>10.4}",
+                frame.frame_index,
+                bin_to_hz(bin, fft_size, sample_rate),
+                magnitude
+            );
+        } else {
+            println!(
+                "  frame {:>5}  peak      n/a  mag        n/a",
+                frame.frame_index
             );
         }
     }

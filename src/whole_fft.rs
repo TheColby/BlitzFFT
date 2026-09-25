@@ -89,7 +89,7 @@ pub fn print_whole_signal_table(results: &[WholeFftBenchResult], len: usize, sam
     println!("  {}", "-".repeat(104));
     for result in results {
         println!(
-            "  {:<26} {:>12.6} {:>12.6} {:>12} {:>21.*} {:>14.6}",
+            "  {:<26} {:>12.9} {:>12.9} {:>12} {:>21.*} {:>14.6}",
             result.algorithm,
             result.setup_secs,
             result.exec_secs,
