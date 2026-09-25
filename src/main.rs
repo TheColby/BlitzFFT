@@ -36,7 +36,7 @@ use audio::{
     window_coeffs_qd, write_wav_f32, ChannelSelection, ProcessingPrecision, WindowFunction,
 };
 use backends::select_backend;
-use output::{print_summary, write_frames, OutputFormat};
+use output::{print_precomputed_summary, print_summary, write_frames, OutputFormat};
 use quad::Quad;
 
 // ── CLI definition ────────────────────────────────────────────────────────────
@@ -465,6 +465,30 @@ fn main() -> Result<()> {
             let (gpu_res, cpu_res) =
                 benchmark::run(&backend, &frames, args.fft_size, args.bench_repeats)?;
             benchmark::print_table(&gpu_res, &cpu_res);
+            return Ok(());
+        }
+
+        if args.summary && args.format == OutputFormat::None && !is_gpu {
+            let refs: Vec<&[f32]> = frames.iter().map(Vec::as_slice).collect();
+            let t_start = Instant::now();
+            let summaries = backends::cpu::compute_summary_batch_f32_native(
+                &refs,
+                args.fft_size,
+                sample_rate,
+                args.min_hz,
+                args.max_hz,
+            )?;
+            let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+            eprintln!(
+                "  Done    : {:.2} ms total  ({:.1} μs/frame)",
+                elapsed_ms,
+                elapsed_ms * 1000.0 / summaries.len() as f64,
+            );
+            println!();
+            println!("{}", "  Frame   Peak Freq     Magnitude".dimmed());
+            println!("{}", "  ──────────────────────────────".dimmed());
+            print_precomputed_summary(&summaries, args.fft_size, sample_rate);
+            println!();
             return Ok(());
         }
 

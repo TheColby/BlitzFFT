@@ -3,7 +3,7 @@
 // CPU framed-FFT backend — uses the native BlitzFFT engine (no external FFT libs).
 //
 // f32 path  : BlitzFftPlan (precomputed twiddles + SIMD), Rayon parallel batches.
-// f64 path  : BlitzFftPlan64 (precomputed twiddles, scalar f64).
+// f64 path  : BlitzFftPlan64 (precomputed twiddles + SIMD where supported).
 // quad path : hand-rolled radix-2 over Quad (true binary128 only when the
 //             optional `binary128` feature is enabled).
 
@@ -14,7 +14,7 @@ use anyhow::Result;
 use num_complex::{Complex32, Complex64};
 use rayon::prelude::*;
 
-use super::{FftBackend, FftFrame};
+use super::{FftBackend, FftFrame, FftSummaryFrame};
 use crate::blitz_fft::{get_plan, get_plan_64, BlitzFftPlan, BlitzFftPlan64};
 use crate::quad::Quad;
 
@@ -229,6 +229,109 @@ pub fn compute_batch_f32_native(frames: &[&[f32]], fft_size: usize) -> Result<Ve
     Ok(grouped.into_iter().flatten().collect())
 }
 
+fn summary_peak(
+    bins: impl Iterator<Item = (usize, f32)>,
+    fft_size: usize,
+    sample_rate: u32,
+    min_hz: f32,
+    max_hz: f32,
+) -> Option<(usize, f32)> {
+    bins.filter(|(bin, _)| {
+        let hz = *bin as f32 * sample_rate as f32 / fft_size as f32;
+        hz >= min_hz && hz <= max_hz
+    })
+    .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+}
+
+fn summary_frame(frame_index: usize, peak: Option<(usize, f32)>) -> FftSummaryFrame {
+    FftSummaryFrame {
+        frame_index,
+        peak_bin: peak.map(|(bin, _)| bin),
+        magnitude: peak.map_or(0.0, |(_, magnitude)| magnitude),
+    }
+}
+
+/// Compute only the peak for each f32 frame, avoiding per-frame magnitude vectors.
+pub fn compute_summary_batch_f32_native(
+    frames: &[&[f32]],
+    fft_size: usize,
+    sample_rate: u32,
+    min_hz: Option<f32>,
+    max_hz: Option<f32>,
+) -> Result<Vec<FftSummaryFrame>> {
+    let plan = get_plan(fft_size);
+    let pair_plan = get_plan(fft_size * 2);
+    let min_hz = min_hz.unwrap_or(0.0);
+    let max_hz = max_hz.unwrap_or(f32::INFINITY);
+
+    let grouped = frames
+        .par_chunks(2)
+        .enumerate()
+        .map(|(pair_index, chunk)| {
+            let first_index = pair_index * 2;
+            if chunk.len() == 2 {
+                with_pair_work32(fft_size, |work| {
+                    for (index, slot) in work.complex.iter_mut().enumerate() {
+                        *slot = Complex32::new(
+                            chunk[0].get(index).copied().unwrap_or(0.0),
+                            chunk[1].get(index).copied().unwrap_or(0.0),
+                        );
+                    }
+                    pair_plan.fft_pow2_inplace(&mut work.complex);
+                    let mut first_peak = None;
+                    let mut second_peak = None;
+                    for bin in 0..=fft_size / 2 {
+                        let hz = bin as f32 * sample_rate as f32 / fft_size as f32;
+                        if hz < min_hz || hz > max_hz {
+                            continue;
+                        }
+                        let mirror = if bin == 0 { 0 } else { fft_size - bin };
+                        let forward = work.complex[bin];
+                        let mirrored = work.complex[mirror].conj();
+                        let first = (forward + mirrored) * 0.5;
+                        let second = (forward - mirrored) * Complex32::new(0.0, -0.5);
+                        let first_mag = first.norm();
+                        let second_mag = second.norm();
+                        if first_peak.is_none_or(|(_, best)| first_mag > best) {
+                            first_peak = Some((bin, first_mag));
+                        }
+                        if second_peak.is_none_or(|(_, best)| second_mag > best) {
+                            second_peak = Some((bin, second_mag));
+                        }
+                    }
+                    vec![
+                        summary_frame(first_index, first_peak),
+                        summary_frame(first_index + 1, second_peak),
+                    ]
+                })
+            } else {
+                vec![with_work32(&plan, |work| {
+                    let frame = chunk[0];
+                    let len = frame.len().min(fft_size);
+                    work.input[..len].copy_from_slice(&frame[..len]);
+                    work.input[len..].fill(0.0);
+                    plan.fft_real(&work.input, &mut work.scratch, &mut work.output);
+                    summary_frame(
+                        first_index,
+                        summary_peak(
+                            work.output
+                                .iter()
+                                .enumerate()
+                                .map(|(bin, c)| (bin, c.norm())),
+                            fft_size,
+                            sample_rate,
+                            min_hz,
+                            max_hz,
+                        ),
+                    )
+                })]
+            }
+        })
+        .collect::<Vec<_>>();
+
+    Ok(grouped.into_iter().flatten().collect())
+}
+
 /// Compute a batch of f64 frames using the native BlitzFFT f64 engine.
 pub fn compute_batch_f64(frames: &[Vec<f64>], fft_size: usize) -> Result<Vec<FftFrame>> {
     let plan = get_plan_64(fft_size);
@@ -374,7 +477,7 @@ impl FftBackend for CpuFftBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::compute_batch_f32_native;
+    use super::{compute_batch_f32_native, compute_summary_batch_f32_native};
     use crate::blitz_fft::get_plan;
     use num_complex::Complex32;
 
@@ -415,6 +518,41 @@ mod tests {
                     (actual - expected).abs() <= 1e-4,
                     "frame {frame_index} bin {bin}: {actual} != {expected}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn summary_batch_matches_full_spectrum_with_frequency_filter() {
+        let frames = [
+            vec![0.25, -1.0, 0.5, 0.75, -0.125, 0.0, 1.5, -0.25],
+            vec![1.0, 0.5, -0.25, 0.125, -0.75, 0.3, 0.2, -0.4],
+            vec![0.0, 0.2, 0.4, -0.6, 0.8, -1.0, 0.1, -0.3],
+        ];
+        let refs: Vec<&[f32]> = frames.iter().map(Vec::as_slice).collect();
+        let full = compute_batch_f32_native(&refs, 8).unwrap();
+        for (min_hz, max_hz) in [
+            (None, None),
+            (Some(1000.0), Some(3000.0)),
+            (Some(9000.0), None),
+        ] {
+            let summaries =
+                compute_summary_batch_f32_native(&refs, 8, 8000, min_hz, max_hz).unwrap();
+            for (summary, frame) in summaries.iter().zip(&full) {
+                let expected = frame
+                    .magnitude
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(bin, _)| {
+                        let hz = *bin as f32 * 1000.0;
+                        hz >= min_hz.unwrap_or(0.0) && hz <= max_hz.unwrap_or(f32::INFINITY)
+                    })
+                    .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0)));
+                assert_eq!(summary.peak_bin, expected.map(|(bin, _)| bin));
+                if let Some((_, magnitude)) = expected {
+                    assert!((summary.magnitude - magnitude).abs() < 1e-4);
+                }
             }
         }
     }

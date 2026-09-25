@@ -26,9 +26,11 @@ The main gaps are now more specific:
 
 - the native `f64` whole-file path is still meaningfully slower than `RealFFT`
 - the arbitrary-length Bluestein path still leaves speed on the table
-- some workflows still compute and store more spectrum data than they need
+- top-bin output still computes and stores more spectrum data than it needs
 - benchmark presentation is much better than before, but reproducibility can still tighten
 - the repo narrative is strong, but the README can do a better job of explaining priorities and tradeoffs
+
+Recent progress: Homebrew packaging, `f64` SIMD butterflies, paired real-frame batching, and a summary-only `f32` CPU path are implemented.
 
 ## Near-term priorities
 
@@ -38,10 +40,10 @@ Goal: improve real throughput where BlitzFFT is trying to compete, not just benc
 
 Work:
 
-- Add SIMD acceleration for the `f64` power-of-two butterflies.
+- Benchmark and tune the existing `f64` SIMD butterflies across supported CPUs.
 - Speed up the Bluestein inner FFT path, which is still scalar in important spots.
 - Keep reducing allocation and copy overhead in the native real-input paths.
-- Avoid materializing full magnitude vectors when the caller only needs summary peaks or top bins.
+- Extend the summary-only allocation savings to top-bin workflows.
 - Measure framed and whole-file performance separately so kernel wins are visible.
 
 Success looks like:
@@ -91,7 +93,7 @@ Goal: stop paying for data movement and formatting that the user did not ask for
 
 Work:
 
-- Add a summary-only fast path that does not store every frame's full magnitude vector.
+- Extend the `f32` CPU summary-only fast path to other precision modes where useful.
 - Add a top-bin fast path that avoids formatting or serializing irrelevant bins.
 - Add machine-readable benchmark export for CI and scripted comparisons.
 - Keep output schemas stable enough for automation.
@@ -167,7 +169,7 @@ Focus:
 
 Focus:
 
-- summary/top-bin fast paths
+- top-bin and additional-precision fast paths
 - benchmark export and scripting support
 - modularized native FFT implementation
 

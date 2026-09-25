@@ -15,7 +15,7 @@ use std::{
 
 use crate::{
     audio::{bin_to_hz, peak_bin},
-    backends::FftFrame,
+    backends::{FftFrame, FftSummaryFrame},
 };
 
 /// How to write output.
@@ -267,6 +267,24 @@ pub fn print_summary(
             println!(
                 "  frame {:>5}  peak {:>7.1} Hz  mag {:>10.4}",
                 f.frame_index, hz, mag
+            );
+        }
+    }
+}
+
+/// Print a precomputed one-line summary per frame to stdout.
+pub fn print_precomputed_summary(frames: &[FftSummaryFrame], fft_size: usize, sample_rate: u32) {
+    for f in frames {
+        if let Some(bin) = f.peak_bin {
+            let hz = bin_to_hz(bin, fft_size, sample_rate);
+            println!(
+                "  frame {:>5}  peak {:>7.1} Hz  mag {:>10.4}",
+                f.frame_index, hz, f.magnitude
+            );
+        } else {
+            println!(
+                "  frame {:>5}  peak      n/a  mag        n/a",
+                f.frame_index
             );
         }
     }

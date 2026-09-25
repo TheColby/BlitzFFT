@@ -64,6 +64,7 @@ The whole-file path is different. It treats the entire waveform as one signal an
 - Framed results no longer allocate an unused full complex spectrum for each frame.
 - The framed `f32` CPU path can batch pairs of real frames by packing one frame into the complex real lane and the next frame into the imaginary lane, then recovering both real spectra from one complex FFT.
 - The native `f64` power-of-two CPU FFT path now uses SIMD butterflies on supported `x86_64` and `aarch64` machines.
+- `--precision 32 --backend cpu --summary -f none` now scans peaks directly, avoiding per-frame magnitude arrays.
 - The repo now has an exact whole-file benchmark path for long real-valued signals, including non-power-of-two lengths.
 - The default whole-file benchmark compares three native-Rust paths side by side: `BlitzFFT native`, `RealFFT`, and `RustFFT complex`.
 - Optional `FFTW3f`, `KissFFT`, and `PocketFFT` comparisons can be enabled explicitly with Cargo features.
@@ -77,10 +78,10 @@ If we want BlitzFFT to become meaningfully better, the next work should stay foc
 
 The biggest remaining speed opportunity is the native CPU FFT core, especially the `f64` whole-file path and the arbitrary-length Bluestein path. That means:
 
-- add stronger SIMD coverage for `f64`
+- measure and tune the existing `f64` SIMD kernels
 - keep reducing copies and scratch churn in the real-input kernels
 - improve the scalar Bluestein inner FFT path
-- stop doing full-spectrum work when the caller only asked for summary peaks or top bins
+- extend the summary-only memory savings to top-bin output
 
 ### 2. Keep every speed claim tied to correctness
 
@@ -92,7 +93,7 @@ The default story should remain: stable Rust, native CPU path, no required forei
 
 ### 4. Make the CLI do less unnecessary work
 
-Some workflows only need a peak summary, a few top bins, or a machine-readable benchmark row. Those paths should not have to pay for full magnitude storage and formatting when the user did not ask for it.
+The `f32` CPU path now computes peak summaries without storing every magnitude when using `--summary -f none`. Top-bin output and other precision modes remain opportunities to avoid unnecessary storage and formatting.
 
 ### 5. Make benchmark docs even easier to trust
 

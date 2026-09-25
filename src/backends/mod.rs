@@ -8,6 +8,14 @@ pub struct FftFrame {
     pub magnitude: Vec<f32>, // only positive-frequency bins (N/2+1)
 }
 
+/// One FFT hop summarized as a single peak bin.
+#[derive(Debug)]
+pub struct FftSummaryFrame {
+    pub frame_index: usize,
+    pub peak_bin: Option<usize>,
+    pub magnitude: f32,
+}
+
 /// Common interface every backend must satisfy.
 pub trait FftBackend: Send + Sync {
     /// Human-readable name shown in CLI output.
