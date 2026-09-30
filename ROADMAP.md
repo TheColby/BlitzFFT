@@ -30,7 +30,7 @@ The main gaps are now more specific:
 - benchmark presentation is much better than before, but reproducibility can still tighten
 - the repo narrative is strong, but the README can do a better job of explaining priorities and tradeoffs
 
-Recent progress: Homebrew packaging, `f64` SIMD butterflies, paired real-frame batching, a summary-only `f32` CPU path, a bounded top-bin CPU path, a SIMD-backed Bluestein convolution, and a reproducible local benchmark runner are implemented.
+Recent progress: Homebrew packaging, `f64` SIMD butterflies, paired real-frame batching, a summary-only `f32` CPU path, a bounded top-bin CPU path, a SIMD-backed Bluestein convolution, fused small FFT stages, and a reproducible local benchmark runner are implemented.
 
 ## Near-term priorities
 

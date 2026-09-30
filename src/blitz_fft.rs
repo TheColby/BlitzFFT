@@ -135,9 +135,13 @@ impl BlitzFftPlan {
 
         let bit_rev = if pow2 {
             let log2m = m.trailing_zeros();
-            (0..m as u32)
-                .map(|i| i.reverse_bits() >> (32 - log2m))
-                .collect()
+            if log2m == 0 {
+                vec![0]
+            } else {
+                (0..m as u32)
+                    .map(|i| i.reverse_bits() >> (32 - log2m))
+                    .collect()
+            }
         } else {
             vec![]
         };
@@ -393,11 +397,31 @@ impl BlitzFftPlan {
             }
         }
 
-        // Butterfly stages: step = 2, 4, 8, …, m.
+        // Fuse the first two stages. Their only twiddles are 1 and -i.
+        if self.m == 2 {
+            let a = buf[0];
+            let b = buf[1];
+            buf[0] = a + b;
+            buf[1] = a - b;
+        } else {
+            for group in buf.chunks_exact_mut(4) {
+                let even = group[0] + group[1];
+                let odd = group[0] - group[1];
+                let even_next = group[2] + group[3];
+                let odd_next = group[2] - group[3];
+                let twisted = Complex32::new(odd_next.im, -odd_next.re);
+                group[0] = even + even_next;
+                group[1] = odd + twisted;
+                group[2] = even - even_next;
+                group[3] = odd - twisted;
+            }
+        }
+
+        // Remaining butterfly stages: step = 8, 16, …, m.
         let m = self.m;
         let twiddles = &self.twiddles;
 
-        let mut step = 2usize;
+        let mut step = 8usize;
         while step <= m {
             #[cfg(target_arch = "aarch64")]
             {
@@ -513,22 +537,19 @@ impl BlitzFftPlan {
             let wi = slot.im;
             let kr = kernel.re;
             let ki = kernel.im;
-            *slot = Complex32::new(wr * kr - wi * ki, wr * ki + wi * kr);
-        }
-
-        for value in work.iter_mut() {
-            *value = Complex32::new(value.re, -value.im);
+            // Conjugate the pointwise product for the inverse-via-forward FFT.
+            *slot = Complex32::new(wr * kr - wi * ki, -(wr * ki + wi * kr));
         }
         bluestein.inner.fft_pow2_inplace(work);
         let scale = 1.0 / bluestein.conv_len as f32;
-        for value in work.iter_mut() {
-            *value = Complex32::new(value.re * scale, -value.im * scale);
-        }
 
         for (bin, out) in output.iter_mut().enumerate() {
             let wk = work[bin];
             let ck = bluestein.chirp[bin];
-            *out = Complex32::new(ck.re * wk.re - ck.im * wk.im, ck.re * wk.im + ck.im * wk.re);
+            *out = Complex32::new(
+                (ck.re * wk.re + ck.im * wk.im) * scale,
+                (ck.im * wk.re - ck.re * wk.im) * scale,
+            );
         }
     }
 
@@ -601,22 +622,18 @@ fn fft_real_bluestein_f64_with_plan(
         let wi = slot.im;
         let kr = kernel.re;
         let ki = kernel.im;
-        *slot = Complex64::new(wr * kr - wi * ki, wr * ki + wi * kr);
-    }
-
-    for value in work.iter_mut() {
-        *value = Complex64::new(value.re, -value.im);
+        *slot = Complex64::new(wr * kr - wi * ki, -(wr * ki + wi * kr));
     }
     plan.inner.fft_pow2_inplace(work);
     let scale = 1.0 / plan.conv_len as f64;
-    for value in work.iter_mut() {
-        *value = Complex64::new(value.re * scale, -value.im * scale);
-    }
 
     for (bin, out) in output.iter_mut().enumerate() {
         let wk = work[bin];
         let ck = plan.chirp[bin];
-        *out = Complex64::new(ck.re * wk.re - ck.im * wk.im, ck.re * wk.im + ck.im * wk.re);
+        *out = Complex64::new(
+            (ck.re * wk.re + ck.im * wk.im) * scale,
+            (ck.im * wk.re - ck.re * wk.im) * scale,
+        );
     }
 }
 
@@ -627,9 +644,13 @@ impl BlitzFftPlan64 {
         let m = n / 2;
         let log2m = m.trailing_zeros();
 
-        let bit_rev = (0..m as u32)
-            .map(|i| i.reverse_bits() >> (32 - log2m))
-            .collect();
+        let bit_rev = if log2m == 0 {
+            vec![0]
+        } else {
+            (0..m as u32)
+                .map(|i| i.reverse_bits() >> (32 - log2m))
+                .collect()
+        };
 
         let twiddles = (0..m / 2)
             .map(|k| {
@@ -792,9 +813,28 @@ impl BlitzFftPlan64 {
             }
         }
 
+        if self.m == 2 {
+            let a = buf[0];
+            let b = buf[1];
+            buf[0] = a + b;
+            buf[1] = a - b;
+        } else {
+            for group in buf.chunks_exact_mut(4) {
+                let even = group[0] + group[1];
+                let odd = group[0] - group[1];
+                let even_next = group[2] + group[3];
+                let odd_next = group[2] - group[3];
+                let twisted = Complex64::new(odd_next.im, -odd_next.re);
+                group[0] = even + even_next;
+                group[1] = odd + twisted;
+                group[2] = even - even_next;
+                group[3] = odd - twisted;
+            }
+        }
+
         let m = self.m;
         let twiddles = &self.twiddles;
-        let mut step = 2usize;
+        let mut step = 8usize;
         while step <= m {
             #[cfg(target_arch = "aarch64")]
             {
@@ -1048,6 +1088,23 @@ mod tests {
 
         let expected = naive_rfft_f32(&input);
         assert_bins_close_f32(&output, &expected, 1e-4);
+    }
+
+    #[test]
+    fn fused_small_stages_match_naive_across_power_of_two_sizes() {
+        for n in [2, 4, 8, 16, 32, 64] {
+            let input: Vec<f32> = (0..n).map(|i| ((i * 11 + 3) as f32 * 0.19).sin()).collect();
+            let mut scratch = vec![Complex32::new(0.0, 0.0); n / 2];
+            let mut output = vec![Complex32::new(0.0, 0.0); n / 2 + 1];
+            get_plan(n).fft_real_pow2(&input, &mut scratch, &mut output);
+            assert_bins_close_f32(&output, &naive_rfft_f32(&input), 3e-4);
+
+            let input64: Vec<f64> = input.iter().copied().map(f64::from).collect();
+            let mut scratch64 = vec![Complex64::new(0.0, 0.0); n / 2];
+            let mut output64 = vec![Complex64::new(0.0, 0.0); n / 2 + 1];
+            get_plan_64(n).fft_real_pow2(&input64, &mut scratch64, &mut output64);
+            assert_bins_close_f64(&output64, &naive_rfft_f64(&input64), 1e-9);
+        }
     }
 
     #[test]

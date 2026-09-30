@@ -65,6 +65,7 @@ The whole-file path is different. It treats the entire waveform as one signal an
 - The framed `f32` CPU path can batch pairs of real frames by packing one frame into the complex real lane and the next frame into the imaginary lane, then recovering both real spectra from one complex FFT.
 - The native `f64` power-of-two CPU FFT path now uses SIMD butterflies on supported `x86_64` and `aarch64` machines.
 - Bluestein's arbitrary-length convolution now reuses the native power-of-two SIMD plan and its precomputed twiddles.
+- The native power-of-two kernel fuses its first two butterfly stages, and Bluestein avoids separate full-buffer conjugation and scaling passes. On one Apple Silicon release build, the median `f64` execution time at `65,521` samples fell from about `3.19` ms to `3.00` ms across repeated local trials; the `65,536`-sample case fell from about `0.345` ms to `0.320` ms. These are workload-specific measurements, not a general speed claim.
 - CPU `--top-bins` output keeps only the requested bins per frame in `f32` and `f64` modes.
 - `--precision 32 --backend cpu --summary -f none` now scans peaks directly, avoiding per-frame magnitude arrays.
 - The repo now has an exact whole-file benchmark path for long real-valued signals, including non-power-of-two lengths.
