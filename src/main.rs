@@ -55,7 +55,7 @@ enum BackendChoice {
 #[derive(Parser, Debug)]
 #[command(
     name = "blitzfft",
-    version = "0.1.0",
+    version,
     author = "Colby Leider <colby@leider.org>",
     about = "FFT analysis and benchmarking CLI with a native Rust CPU engine"
 )]

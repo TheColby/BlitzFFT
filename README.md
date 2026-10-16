@@ -394,6 +394,32 @@ When `--precision 64` is selected, the whole-file benchmark currently uses the C
 
 ## Install
 
+### pip (after the first PyPI release)
+
+```bash
+python3 -m pip install blitzfft
+blitzfft --version
+blitzfft --list-backends
+```
+
+This installs the `blitzfft` command-line executable, **not** a Python importable API. Published wheels contain the default native Rust CPU build; CUDA, Metal, experimental `binary128`, and foreign-library comparisons are still opt-in Cargo builds. PyPI installation is not available until the first release is published.
+
+To install this checkout before then, install a Rust toolchain and run:
+
+```bash
+python3 -m pip install .
+```
+
+Source installs need Rust because the Python build backend compiles the CLI. Use a virtual environment if you do not want to modify your system Python environment.
+
+### PyPI release registration
+
+The project owner must create a **pending trusted publisher** for the `blitzfft` project on PyPI before the first upload. Set GitHub owner to `TheColby`, repository to `BlitzFFT`, workflow filename to `release.yml`, and environment to `pypi`. The pending publisher does not reserve the project name; confirm name availability and ownership before publishing. Configure a GitHub `pypi` environment, ideally with required reviewers. No PyPI API token is needed in repository secrets.
+
+For a release, verify CI, create a `vX.Y.Z` tag matching `Cargo.toml`, and publish a GitHub Release for that tag. The [release workflow](.github/workflows/release.yml) builds platform wheels and a source distribution, then uploads them through PyPI trusted publishing. Do not publish an unreviewed release: PyPI version files cannot be replaced after upload.
+
+See [PyPI's pending publisher instructions](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/) and [trusted publishing guide](https://docs.pypi.org/trusted-publishers/using-a-publisher/).
+
 ### Homebrew
 
 BlitzFFT ships a head-only Homebrew formula in this repository. Until the project has tagged release tarballs, install the current `main` branch with:

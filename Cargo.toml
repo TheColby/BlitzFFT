@@ -4,6 +4,10 @@ version     = "0.1.0"
 edition     = "2021"
 description = "Native Rust FFT for audio — SIMD CPU, CUDA, and Metal backends"
 authors     = ["Colby Leider <colby@leider.org>"]
+license     = "MIT"
+repository  = "https://github.com/TheColby/BlitzFFT"
+readme      = "README.md"
+exclude     = ["data/**", "output/**", "benchmarks/**", "scripts/**", "Formula/**", ".github/**"]
 
 [[bin]]
 name = "blitzfft"
