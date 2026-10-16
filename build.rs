@@ -126,7 +126,12 @@ fn compile_pocketfft_bridge(out_dir: &Path) {
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=pocketfft_bridge");
-    println!("cargo:rustc-link-lib=dylib=c++");
+    let cpp_runtime = match env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("macos") => "c++",
+        Ok("linux") => "stdc++",
+        other => panic!("PocketFFT bridge has no configured C++ runtime for {other:?}"),
+    };
+    println!("cargo:rustc-link-lib=dylib={cpp_runtime}");
 }
 
 fn link_fftw() -> bool {

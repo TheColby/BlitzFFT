@@ -8,7 +8,8 @@ dynamic = ["version"]
 description = "Native Rust FFT analysis and benchmarking CLI for audio"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Colby Leider", email = "colby@leider.org" }]
 classifiers = [
   "Development Status :: 3 - Alpha",

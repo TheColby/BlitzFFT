@@ -3,6 +3,12 @@ name: PyPI release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to package without publishing
+        required: false
+        default: main
 
 permissions:
   contents: read
@@ -12,7 +18,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.ref || github.ref_name }}
       - name: Match release tag to Cargo version
+        if: github.event_name == 'release'
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
@@ -52,6 +61,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.ref || github.ref_name }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -61,9 +72,29 @@ jobs:
           manylinux: ${{ matrix.manylinux }}
           args: --release --locked --out dist
       - name: Smoke test installed wheel
+        shell: bash
         run: |
-          python -c "import glob, subprocess, sys; wheels = glob.glob('dist/*.whl'); assert len(wheels) == 1, wheels; subprocess.run([sys.executable, '-m', 'pip', 'install', wheels[0]], check=True)"
-          python -c "import shutil, subprocess; binary = shutil.which('blitzfft'); assert binary, 'blitzfft missing from PATH'; subprocess.run([binary, '--version'], check=True); subprocess.run([binary, '--list-backends'], check=True)"
+          python - <<'PY'
+          import glob
+          import os
+          import pathlib
+          import subprocess
+          import tempfile
+          import venv
+
+          wheels = glob.glob("dist/*.whl")
+          if len(wheels) != 1:
+              raise SystemExit(f"expected one wheel, found {wheels}")
+          with tempfile.TemporaryDirectory() as directory:
+              env = pathlib.Path(directory) / "venv"
+              venv.create(env, with_pip=True)
+              scripts = env / ("Scripts" if os.name == "nt" else "bin")
+              python = scripts / ("python.exe" if os.name == "nt" else "python")
+              binary = scripts / ("blitzfft.exe" if os.name == "nt" else "blitzfft")
+              subprocess.run([str(python), "-m", "pip", "install", str(pathlib.Path(wheels[0]).resolve())], check=True)
+              for option in ("--version", "--list-backends"):
+                  subprocess.run([str(binary), option], cwd=directory, check=True)
+          PY
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
@@ -76,11 +107,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.ref || github.ref_name }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Install maturin
         run: python3 -m pip install 'maturin>=1.8,<2'
       - name: Build source distribution
-        run: maturin sdist --out dist
+        run: maturin sdist --locked --out dist
+      - name: Smoke test source distribution
+        run: |
+          python3 -m venv /tmp/blitzfft-sdist-venv
+          /tmp/blitzfft-sdist-venv/bin/python -m pip install dist/*.tar.gz
+          /tmp/blitzfft-sdist-venv/bin/blitzfft --version
+          /tmp/blitzfft-sdist-venv/bin/blitzfft --list-backends
       - name: Upload source distribution
         uses: actions/upload-artifact@v4
         with:
@@ -88,8 +127,37 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
-  publish:
+  audit:
     needs: [wheels, sdist]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - name: Check release artifacts
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          wheels = list(Path("dist").glob("*.whl"))
+          sdists = list(Path("dist").glob("*.tar.gz"))
+          if len(wheels) != 5 or len(sdists) != 1:
+              raise SystemExit(f"expected 5 wheels and 1 sdist, found {len(wheels)} wheels and {len(sdists)} sdists")
+          if len({path.name for path in wheels}) != len(wheels):
+              raise SystemExit("duplicate wheel filenames")
+          PY
+          python3 -m pip install 'twine>=6,<7'
+          python3 -m twine check dist/*
+
+  publish:
+    needs: audit
+    if: github.event_name == 'release'
     runs-on: ubuntu-24.04
     environment: pypi
     permissions:
