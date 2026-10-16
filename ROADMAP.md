@@ -32,6 +32,8 @@ The main gaps are now more specific:
 
 Recent progress: Homebrew packaging, `f64` SIMD butterflies, paired real-frame batching, a summary-only `f32` CPU path, a bounded top-bin CPU path, a SIMD-backed Bluestein convolution, fused small FFT stages, and a reproducible local benchmark runner are implemented.
 
+Version 0.2 adds machine-readable benchmark reports and broader randomized correctness coverage. The new tests exposed and fixed a reused-buffer regression. A bounded optimization pass did not produce a repeatable speedup, so the native CPU performance goal remains open rather than being claimed as complete.
+
 ## Near-term priorities
 
 ### 1. Make the native CPU engine materially faster
@@ -95,7 +97,7 @@ Work:
 
 - Extend the `f32` CPU summary-only fast path to other precision modes where useful.
 - Profile the new top-bin path for small and large selection limits.
-- Add machine-readable benchmark export for CI and scripted comparisons.
+- Maintain the new machine-readable benchmark export for CI and scripted comparisons.
 - Keep output schemas stable enough for automation.
 
 Success looks like:
@@ -156,14 +158,15 @@ The repo gets muddier if it tries to imply both without resourcing both.
 
 ## Suggested release shape
 
-### `v0.2`
+### `v0.2` (release scope)
 
-Focus:
+Delivered:
 
-- faster native CPU kernels
 - stronger correctness coverage for the native engine
 - clearer benchmark reproducibility
 - README and CLI polish
+
+Deferred: a measured native CPU speedup. Proposed changes that did not beat the baseline were not kept.
 
 ### `v0.3`
 

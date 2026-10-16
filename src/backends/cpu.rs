@@ -312,6 +312,7 @@ pub fn compute_summary_batch_f32_native(
                     let len = frame.len().min(fft_size);
                     work.input[..len].copy_from_slice(&frame[..len]);
                     work.input[len..].fill(0.0);
+                    work.input_len = len;
                     plan.fft_real(&work.input, &mut work.scratch, &mut work.output);
                     summary_frame(
                         first_index,
@@ -457,6 +458,7 @@ pub fn compute_top_batch_f32_native(
                     let len = frame.len().min(fft_size);
                     work.input[..len].copy_from_slice(&frame[..len]);
                     work.input[len..].fill(0.0);
+                    work.input_len = len;
                     plan.fft_real(&work.input, &mut work.scratch, &mut work.output);
                     let mut top = TopBins::new(limit, fft_size, sample_rate, min_hz, max_hz);
                     for (bin, value) in work.output.iter().enumerate() {
@@ -489,6 +491,7 @@ pub fn compute_top_batch_f64_native(
                 let len = frame.len().min(fft_size);
                 work.input[..len].copy_from_slice(&frame[..len]);
                 work.input[len..].fill(0.0);
+                work.input_len = len;
                 plan.fft_real_pow2(&work.input, &mut work.scratch, &mut work.output);
                 let mut top = TopBins::new(limit, fft_size, sample_rate, min_hz, max_hz);
                 for (bin, value) in work.output.iter().enumerate() {
@@ -651,6 +654,46 @@ mod tests {
     };
     use crate::blitz_fft::get_plan;
     use num_complex::Complex32;
+    use realfft::RealFftPlanner;
+
+    fn random_frame(len: usize, seed: &mut u64) -> Vec<f32> {
+        (0..len)
+            .map(|_| {
+                *seed ^= *seed << 13;
+                *seed ^= *seed >> 7;
+                *seed ^= *seed << 17;
+                ((*seed >> 40) as f32 / (1_u64 << 24) as f32) * 2.0 - 1.0
+            })
+            .collect()
+    }
+
+    fn assert_batch_matches_realfft(
+        frames: &[Vec<f32>],
+        n: usize,
+        planner: &mut RealFftPlanner<f32>,
+    ) {
+        let refs: Vec<&[f32]> = frames.iter().map(Vec::as_slice).collect();
+        let actual = compute_batch_f32_native(&refs, n).unwrap();
+        assert_eq!(actual.len(), frames.len());
+        let reference = planner.plan_fft_forward(n);
+        for (index, (frame, result)) in frames.iter().zip(&actual).enumerate() {
+            let mut padded = vec![0.0; n];
+            let len = frame.len().min(n);
+            padded[..len].copy_from_slice(&frame[..len]);
+            let mut expected = reference.make_output_vec();
+            reference.process(&mut padded, &mut expected).unwrap();
+            assert_eq!(result.frame_index, index);
+            assert_eq!(result.magnitude.len(), expected.len());
+            for (bin, (&got, want)) in result.magnitude.iter().zip(expected.iter()).enumerate() {
+                let tolerance = 3e-5 * n as f32;
+                assert!(
+                    (got - want.norm()).abs() <= tolerance,
+                    "n={n} frame={index} bin={bin}: {got} != {}",
+                    want.norm()
+                );
+            }
+        }
+    }
 
     fn reference_magnitude(frame: &[f32]) -> Vec<f32> {
         let plan = get_plan(frame.len());
@@ -773,5 +816,76 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn randomized_paired_and_tail_batches_match_realfft_across_reuse() {
+        let mut seed = 0xa5a5_1234_9876_5eed;
+        let mut planner = RealFftPlanner::<f32>::new();
+        for n in [2, 8, 64, 256] {
+            assert_batch_matches_realfft(&[], n, &mut planner);
+            for count in [1, 2, 3, 5] {
+                let frames: Vec<_> = (0..count)
+                    .map(|index| random_frame([n, n / 2, 0, n + 3, 1][index], &mut seed))
+                    .collect();
+                assert_batch_matches_realfft(&frames, n, &mut planner);
+            }
+            // Alternate long and short odd tails on the same thread-local buffer.
+            for len in [n, 1, n / 2, 0, n + 1, 1] {
+                assert_batch_matches_realfft(&[random_frame(len, &mut seed)], n, &mut planner);
+            }
+        }
+    }
+
+    #[test]
+    fn f64_batch_reuse_matches_realfft_after_length_changes() {
+        let mut seed = 0xfeed_face_1234_5678;
+        let mut planner = RealFftPlanner::<f64>::new();
+        for n in [2, 16, 128] {
+            let reference = planner.plan_fft_forward(n);
+            for len in [n, 1, n / 2, 0, n + 3, 1] {
+                let frame: Vec<f64> = random_frame(len, &mut seed)
+                    .into_iter()
+                    .map(f64::from)
+                    .collect();
+                let actual = compute_batch_f64(&[frame.clone()], n).unwrap();
+                let mut padded = vec![0.0; n];
+                padded[..len.min(n)].copy_from_slice(&frame[..len.min(n)]);
+                let mut expected = reference.make_output_vec();
+                reference.process(&mut padded, &mut expected).unwrap();
+                assert_eq!(actual[0].frame_index, 0);
+                for (bin, (&got, want)) in actual[0].magnitude.iter().zip(&expected).enumerate() {
+                    assert!(
+                        (got - want.norm() as f32).abs() <= 2e-5 * n as f32,
+                        "n={n} len={len} bin={bin}: {got} != {}",
+                        want.norm()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn summary_and_top_paths_do_not_leave_stale_samples_for_short_frames() {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            let full32 = [0.0, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            let short32 = [0.5];
+            compute_summary_batch_f32_native(&[&full32], 8, 8000, None, None).unwrap();
+            let after_summary = compute_batch_f32_native(&[&short32], 8).unwrap();
+            assert!((after_summary[0].magnitude[0] - 0.5).abs() < 1e-6);
+
+            compute_top_batch_f32_native(&[&full32], 8, 8000, 1, None, None);
+            let after_top = compute_batch_f32_native(&[&short32], 8).unwrap();
+            assert!((after_top[0].magnitude[0] - 0.5).abs() < 1e-6);
+
+            let full64 = vec![0.0, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            compute_top_batch_f64_native(&[full64], 8, 8000, 1, None, None);
+            let after_top64 = compute_batch_f64(&[vec![0.5]], 8).unwrap();
+            assert!((after_top64[0].magnitude[0] - 0.5).abs() < 1e-6);
+        });
     }
 }

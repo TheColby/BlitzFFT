@@ -1,6 +1,6 @@
 [package]
 name        = "blitzfft"
-version     = "0.1.0"
+version     = "0.2.0"
 edition     = "2021"
 description = "Native Rust FFT for audio — SIMD CPU, CUDA, and Metal backends"
 authors     = ["Colby Leider <colby@leider.org>"]

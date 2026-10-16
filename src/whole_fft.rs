@@ -1,10 +1,16 @@
-use std::time::Instant;
+use std::{
+    fs::File,
+    io::{BufWriter, Write},
+    path::Path,
+    time::Instant,
+};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use num_complex::{Complex32, Complex64};
 use realfft::RealFftPlanner;
 use rustfft::FftPlanner;
 
+use crate::benchmark::write_json_string;
 use crate::blitz_fft::{
     bluestein_work_len_64, fft_real_arbitrary_f64_with_work, get_plan, get_plan_64,
 };
@@ -16,10 +22,10 @@ use anyhow::Context;
 use anyhow::bail;
 
 #[cfg(any(have_fftw, have_kissfft, have_pocketfft))]
-use std::{
-    ffi::c_void,
-    os::raw::{c_int, c_uint},
-};
+use std::{ffi::c_void, os::raw::c_int};
+
+#[cfg(have_fftw)]
+use std::os::raw::c_uint;
 
 #[cfg(any(have_fftw, have_kissfft))]
 use std::ptr::NonNull;
@@ -41,7 +47,7 @@ pub fn run_whole_signal_benchmark(
     sample_rate: u32,
     repeats: usize,
 ) -> Result<Vec<WholeFftBenchResult>> {
-    let repeats = repeats.max(1);
+    ensure!(repeats > 0, "benchmark repeats must be positive");
     let mut results = Vec::with_capacity(6);
 
     results.push(bench_blitzfft_real(signal, sample_rate, repeats)?);
@@ -62,7 +68,7 @@ pub fn run_whole_signal_benchmark_f64(
     sample_rate: u32,
     repeats: usize,
 ) -> Result<Vec<WholeFftBenchResult>> {
-    let repeats = repeats.max(1);
+    ensure!(repeats > 0, "benchmark repeats must be positive");
     let mut results = Vec::with_capacity(3);
 
     results.push(bench_blitzfft_real_f64(signal, sample_rate, repeats)?);
@@ -100,6 +106,79 @@ pub fn print_whole_signal_table(results: &[WholeFftBenchResult], len: usize, sam
         );
     }
     println!();
+}
+
+/// Write a dependency-free, machine-readable v0.2 whole-signal benchmark report.
+pub fn write_json_report(
+    path: &Path,
+    results: &[WholeFftBenchResult],
+    len: usize,
+    sample_rate: u32,
+    precision: u32,
+    repeats: usize,
+) -> Result<()> {
+    ensure!(
+        len > 0 && sample_rate > 0 && repeats > 0,
+        "invalid benchmark workload"
+    );
+    ensure!(
+        precision == 32 || precision == 64,
+        "whole-file benchmark precision must be 32 or 64"
+    );
+    ensure!(!results.is_empty(), "benchmark results must not be empty");
+    for row in results {
+        ensure!(
+            row.setup_secs.is_finite() && row.setup_secs >= 0.0,
+            "invalid setup time"
+        );
+        ensure!(
+            row.exec_secs.is_finite() && row.exec_secs >= 0.0,
+            "invalid execution time"
+        );
+        ensure!(
+            row.peak_bin <= len / 2 && row.peak_freq_hz.is_finite() && row.peak_mag.is_finite(),
+            "invalid peak result"
+        );
+    }
+
+    let mut writer = BufWriter::new(File::create(path)?);
+    write!(writer, "{{\n  \"schema_version\": \"0.2\",\n  \"kind\": \"whole_file_fft_benchmark\",\n  \"samples\": {len},\n  \"sample_rate_hz\": {sample_rate},\n  \"precision_bits\": {precision},\n  \"repeats\": {repeats},\n  \"timing\": {{\"unit\": \"seconds\", \"execution_statistic\": \"arithmetic_mean\", \"scope\": \"setup once per algorithm; FFT calls timed individually; input restoration excluded; fixed algorithm order\"}},\n  \"results\": [\n")?;
+    for (index, row) in results.iter().enumerate() {
+        write!(writer, "    {{\"algorithm\": ")?;
+        write_json_string(&mut writer, row.algorithm)?;
+        write!(writer, ", \"setup_seconds\": {}, \"execution_seconds\": {}, \"peak_bin\": {}, \"peak_hz\": {}, \"peak_magnitude\": {}}}{}\n",
+            row.setup_secs, row.exec_secs, row.peak_bin, row.peak_freq_hz, row.peak_mag,
+            if index + 1 == results.len() { "" } else { "," })?;
+    }
+    writer.write_all(b"  ]\n}\n")?;
+    writer.flush()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::*;
+
+    #[test]
+    fn report_contains_full_precision_numbers_and_schema() {
+        let path = std::env::temp_dir().join(format!("blitzfft-whole-{}.json", std::process::id()));
+        let rows = [WholeFftBenchResult {
+            algorithm: "FFT \"test\"",
+            setup_secs: 0.000000000123,
+            exec_secs: 0.000000000456,
+            peak_bin: 1,
+            peak_freq_hz: 123.456789012345,
+            peak_mag: 0.5,
+        }];
+        write_json_report(&path, &rows, 8, 48_000, 64, 3).unwrap();
+        let report = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(report.contains("\"schema_version\": \"0.2\""));
+        assert!(report.contains("\"precision_bits\": 64"));
+        assert!(report.contains("\"algorithm\": \"FFT \\\"test\\\"\""));
+        assert!(report.contains("0.000000000123"));
+        assert!(report.contains("123.456789012345"));
+    }
 }
 
 fn bench_blitzfft_real(

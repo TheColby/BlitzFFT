@@ -1007,7 +1007,20 @@ mod tests {
         fft_real_arbitrary_f64_with_work, get_plan, get_plan_64,
     };
     use num_complex::{Complex32, Complex64};
+    use realfft::RealFftPlanner;
+    use rustfft::FftPlanner;
     use std::sync::Arc;
+
+    fn samples(n: usize, seed: &mut u64) -> Vec<f64> {
+        (0..n)
+            .map(|_| {
+                *seed ^= *seed << 13;
+                *seed ^= *seed >> 7;
+                *seed ^= *seed << 17;
+                ((*seed >> 40) as f64 / (1_u64 << 24) as f64) * 2.0 - 1.0
+            })
+            .collect()
+    }
 
     fn naive_rfft_f32(input: &[f32]) -> Vec<Complex32> {
         let n = input.len();
@@ -1171,5 +1184,90 @@ mod tests {
 
         assert!(Arc::ptr_eq(&first, &second));
         assert!(Arc::ptr_eq(&first64, &second64));
+    }
+
+    #[test]
+    fn randomized_real_spectra_match_realfft_with_reused_plans_and_work() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15;
+        let mut reference32 = RealFftPlanner::<f32>::new();
+        let mut reference64 = RealFftPlanner::<f64>::new();
+        for n in [2, 4, 8, 16, 64, 256, 3, 5, 7, 15, 31, 63, 127, 257] {
+            let plan = get_plan(n);
+            let mut work32 = vec![
+                Complex32::new(9.0, -3.0);
+                if n.is_power_of_two() {
+                    n / 2
+                } else {
+                    plan.bluestein_work_len()
+                }
+            ];
+            let mut work64 = vec![
+                Complex64::new(9.0, -3.0);
+                if n.is_power_of_two() {
+                    n / 2
+                } else {
+                    bluestein_work_len_64(n)
+                }
+            ];
+            let mut actual32 = vec![Complex32::new(0.0, 0.0); n / 2 + 1];
+            let mut actual64 = vec![Complex64::new(0.0, 0.0); n / 2 + 1];
+            for trial in 0..4 {
+                let input64 = if trial == 2 {
+                    vec![0.0; n]
+                } else {
+                    samples(n, &mut seed)
+                };
+                let input32: Vec<f32> = input64.iter().map(|&v| v as f32).collect();
+                let mut expected32 = reference32.plan_fft_forward(n).make_output_vec();
+                let mut expected64 = reference64.plan_fft_forward(n).make_output_vec();
+                reference32
+                    .plan_fft_forward(n)
+                    .process(&mut input32.clone(), &mut expected32)
+                    .unwrap();
+                reference64
+                    .plan_fft_forward(n)
+                    .process(&mut input64.clone(), &mut expected64)
+                    .unwrap();
+                plan.fft_real_with_work(&input32, &mut actual32, &mut work32);
+                fft_real_arbitrary_f64_with_work(&input64, &mut actual64, &mut work64);
+                assert_bins_close_f32(&actual32, &expected32, 2e-5 * n as f32);
+                assert_bins_close_f64(&actual64, &expected64, 1e-11 * n as f64);
+                assert!(Arc::ptr_eq(&plan, &get_plan(n)));
+                if n.is_power_of_two() {
+                    let p64 = get_plan_64(n);
+                    assert!(Arc::ptr_eq(&p64, &get_plan_64(n)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn randomized_complex_pow2_kernel_matches_rustfft() {
+        let mut seed = 0x1234_5678_9abc_def0;
+        let mut planner32 = FftPlanner::<f32>::new();
+        let mut planner64 = FftPlanner::<f64>::new();
+        for n in [2, 4, 8, 16, 64, 256] {
+            let plan32 = get_plan(2 * n);
+            let plan64 = get_plan_64(2 * n);
+            for _ in 0..3 {
+                let input: Vec<Complex64> = samples(2 * n, &mut seed)
+                    .chunks_exact(2)
+                    .map(|pair| Complex64::new(pair[0], pair[1]))
+                    .collect();
+                let mut actual32: Vec<Complex32> = input
+                    .iter()
+                    .map(|v| Complex32::new(v.re as f32, v.im as f32))
+                    .collect();
+                let mut expected32 = actual32.clone();
+                let mut actual64 = input.clone();
+                let mut expected64 = input;
+                planner32.plan_fft_forward(n).process(&mut expected32);
+                planner64.plan_fft_forward(n).process(&mut expected64);
+                plan32.fft_pow2_inplace(&mut actual32);
+                plan64.fft_pow2_inplace(&mut actual64);
+                assert_bins_close_f32(&actual32, &expected32, 2e-5 * n as f32);
+                assert_bins_close_f64(&actual64, &expected64, 1e-11 * n as f64);
+            }
+        }
     }
 }

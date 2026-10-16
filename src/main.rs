@@ -124,6 +124,10 @@ struct Args {
     #[arg(long, default_value = "5")]
     bench_repeats: usize,
 
+    /// Write machine-readable benchmark results to a JSON file
+    #[arg(long, value_name = "PATH")]
+    benchmark_json: Option<PathBuf>,
+
     /// Run an exact single FFT over the entire signal instead of framing/STFT
     #[arg(long)]
     whole_file_benchmark: bool,
@@ -262,6 +266,11 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if args.benchmark_json.is_some() && !(args.benchmark || args.whole_file_benchmark) {
+        return Err(anyhow!(
+            "--benchmark-json requires --benchmark or --whole-file-benchmark"
+        ));
+    }
     if args.precision == ProcessingPrecision::Bits128 && !quad::TRUE_BINARY128_ENABLED {
         return Err(anyhow!(
             "--precision 128 is an opt-in nightly-only feature; rebuild with `--features binary128` on a nightly toolchain"
@@ -362,6 +371,17 @@ fn main() -> Result<()> {
             whole_fft::run_whole_signal_benchmark(&mono, sample_rate, args.bench_repeats)?
         };
         whole_fft::print_whole_signal_table(&results, mono.len(), sample_rate);
+        if let Some(path) = args.benchmark_json.as_deref() {
+            let precision = if mono64.is_some() { 64 } else { 32 };
+            whole_fft::write_json_report(
+                path,
+                &results,
+                mono.len(),
+                sample_rate,
+                precision,
+                args.bench_repeats,
+            )?;
+        }
         return Ok(());
     }
 
@@ -513,6 +533,9 @@ fn main() -> Result<()> {
             let (gpu_res, cpu_res) =
                 benchmark::run(&backend, &frames, args.fft_size, args.bench_repeats)?;
             benchmark::print_table(&gpu_res, &cpu_res);
+            if let Some(path) = args.benchmark_json.as_deref() {
+                benchmark::write_json_report(path, &gpu_res, &cpu_res, args.bench_repeats)?;
+            }
             return Ok(());
         }
 

@@ -4,7 +4,7 @@
 It has three complementary jobs:
 
 - framed analysis, similar to an STFT pipeline, with backend auto-selection `CUDA -> Metal -> CPU`
-- with frequency estimation errors of ±0.0000028 Hz (vs ±0.023 Hz for 32-bit) on an hour-long window, provide >180 dB SNR for scientific instrumentation applications
+- optional `64-bit` CPU processing for higher numerical precision than the `32-bit` path, with a separate experimental `binary128` mode
 - exact whole-file FFT benchmarking on one long real-valued waveform, with a pure-Rust default comparison set and optional foreign-library comparisons
 
 This repository is partly a tool and partly a notebook on FFT implementation tradeoffs. The code is useful on its own, but it is also a compact place to compare:
@@ -72,6 +72,9 @@ The whole-file path is different. It treats the entire waveform as one signal an
 - The default whole-file benchmark compares three native-Rust paths side by side: `BlitzFFT native`, `RealFFT`, and `RustFFT complex`.
 - Optional `FFTW3f`, `KissFFT`, and `PocketFFT` comparisons can be enabled explicitly with Cargo features.
 - The benchmark docs now center a simulated one-hour `384` kHz scenario using a `439.997` Hz sine and a full-signal Hann window.
+- Version `0.2.0` adds `--benchmark-json` for machine-readable framed and whole-file results. The reproducibility script reads those reports, validates the workload, and records trial medians instead of scraping rounded table text.
+- Randomized cross-checks against `RealFFT` and `RustFFT` cover more FFT sizes, paired-frame batches, and reused plans. They exposed a stale-sample buffer bug, which is fixed.
+- This release does not claim a new native-kernel speedup. A bounded optimization pass was benchmarked and reverted when it failed to improve timing reliably.
 
 ## How To Make It Better
 
@@ -394,7 +397,7 @@ When `--precision 64` is selected, the whole-file benchmark currently uses the C
 
 ## Install
 
-### pip (after the first PyPI release)
+### pip
 
 ```bash
 python3 -m pip install blitzfft
@@ -402,9 +405,9 @@ blitzfft --version
 blitzfft --list-backends
 ```
 
-This installs the `blitzfft` command-line executable, **not** a Python importable API. Published wheels contain the default native Rust CPU build; CUDA, Metal, experimental `binary128`, and foreign-library comparisons are still opt-in Cargo builds. PyPI installation is not available until the first release is published.
+This installs the `blitzfft` command-line executable, **not** a Python importable API. Published wheels contain the default native Rust CPU build; CUDA, Metal, experimental `binary128`, and foreign-library comparisons are still opt-in Cargo builds.
 
-To install this checkout before then, install a Rust toolchain and run:
+To install this checkout instead, install a Rust toolchain and run:
 
 ```bash
 python3 -m pip install .
@@ -412,17 +415,17 @@ python3 -m pip install .
 
 Source installs need Rust because the Python build backend compiles the CLI. Use a virtual environment if you do not want to modify your system Python environment.
 
-### PyPI release registration
+### PyPI publishing
 
-The project owner must create a **pending trusted publisher** for the `blitzfft` project on PyPI before the first upload. Set GitHub owner to `TheColby`, repository to `BlitzFFT`, workflow filename to `release.yml`, and environment to `pypi`. The pending publisher does not reserve the project name; confirm name availability and ownership before publishing. Configure a GitHub `pypi` environment, ideally with required reviewers. No PyPI API token is needed in repository secrets.
+The `blitzfft` PyPI project uses GitHub trusted publishing from `release.yml` in the `pypi` environment. No PyPI API token is needed in repository secrets.
 
 For a release, verify CI, create a `vX.Y.Z` tag matching `Cargo.toml`, and publish a GitHub Release for that tag. The [release workflow](.github/workflows/release.yml) builds platform wheels and a source distribution, then uploads them through PyPI trusted publishing. Do not publish an unreviewed release: PyPI version files cannot be replaced after upload.
 
-See [PyPI's pending publisher instructions](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/) and [trusted publishing guide](https://docs.pypi.org/trusted-publishers/using-a-publisher/).
+See [PyPI's trusted publishing guide](https://docs.pypi.org/trusted-publishers/using-a-publisher/).
 
 ### Homebrew
 
-BlitzFFT ships a head-only Homebrew formula in this repository. Until the project has tagged release tarballs, install the current `main` branch with:
+BlitzFFT ships a head-only Homebrew formula in this repository. It installs the current `main` branch, not a pinned release:
 
 ```bash
 brew install --HEAD ./Formula/blitzfft.rb
@@ -502,6 +505,7 @@ Options:
       --top-bins <TOP_BINS>            Only emit the N loudest bins per frame (0 = all bins) [default: 0]
       --benchmark                      Run framed benchmark comparing selected backend against CPU baseline
       --bench-repeats <BENCH_REPEATS>  Number of benchmark repeats [default: 5]
+      --benchmark-json <PATH>          Write machine-readable benchmark results to a JSON file
       --whole-file-benchmark           Run one exact FFT over the entire signal
       --generate-sine <Hz,SR,Secs>     Synthesize a sine wave in memory
       --write-generated-wav <PATH>     Persist the generated/loaded mono signal as 32-bit float WAV
@@ -521,6 +525,7 @@ Options:
 - `--precision 128` enables an experimental true `binary128` CPU path for framed analysis when the crate is built with `--features binary128` on nightly Rust.
 - `--precision 128` currently does not support `--whole-file-benchmark`, and it does not use GPU backends.
 - Whole-file benchmark mode prints a comparison table and exits.
+- `--benchmark-json` requires `--benchmark` or `--whole-file-benchmark`; it does not replace spectral `--format json` output.
 - `--list-backends`, `--list-precisions`, and `--list-formats` work without an input file and report what this build supports.
 
 ## Examples
@@ -615,13 +620,22 @@ This section matters because FFT benchmarks are easy to misread.
 
 ### Reproduce measured comparisons
 
-The standard-library-only runner builds the release binary and records the Git commit, dirty-tree status, OS, architecture, CPU count, Rust toolchain, Cargo features, signal settings, exact CLI commands, and per-trial results in JSON:
+The standard-library-only runner builds the release binary and records the Git commit, dirty-tree status, OS, architecture, CPU count, Rust toolchain, Cargo features, signal settings, exact CLI commands, raw per-trial results, and per-algorithm medians in JSON:
 
 ```bash
 python3 scripts/measure_whole_fft.py --precision 64 --sizes 1009 1024 4093 4096 65521 65536 --repeats 5 --trials 3 --output /tmp/blitzfft-measured.json
 ```
 
-The default size pairs contrast awkward Bluestein lengths with nearby power-of-two lengths. Use `--precision 32` and optionally `--features foreign-fft` for other available comparisons. Every JSON row is a measurement on the local machine; it is not the simulated `384` kHz one-hour projection below. The runner uses an unwindowed synthetic sine and records separate setup and execution times. The CLI benchmark runs algorithms in a fixed order, so thermal state and cache effects can influence close results. For a published claim, retain the JSON artifact, use a clean commit, and report the median over trials with the hardware and feature flags.
+The default size pairs contrast awkward Bluestein lengths with nearby power-of-two lengths. Use `--precision 32` and optionally `--features foreign-fft` for other available comparisons, but pass only even sizes with `kissfft` or `foreign-fft` because the KissFFT real-input path rejects odd lengths. Every JSON row is a measurement on the local machine; it is not the simulated `384` kHz one-hour projection below. The runner uses an unwindowed synthetic sine and runs each trial in a separate process. Generated samples are `f32`; the `64`-bit benchmark converts those samples to `f64` before transforming, so it does not represent a native `f64` source. For a published claim, retain the JSON artifact, use a clean commit, and report the median over trials with hardware and feature flags.
+
+With CLI JSON wiring, a single whole-file run writes schema `0.2` directly, without parsing the display table:
+
+```bash
+target/release/blitzfft --generate-sine 439.997,48000,1 --precision 64 \
+  --whole-file-benchmark --bench-repeats 5 --benchmark-json /tmp/blitzfft-run.json -f none
+```
+
+The report contains `kind`, `samples`, `sample_rate_hz`, `precision_bits`, `repeats`, `timing`, and ordered `results`. Each result has `algorithm`, `setup_seconds`, `execution_seconds`, `peak_bin`, `peak_hz`, and `peak_magnitude`. A framed `--benchmark` report uses `kind: framed_fft_benchmark`, workload size, ordered backend results with `selected` or `baseline` roles, elapsed milliseconds, and millions of FFTs per second. JSON numbers retain Rust's full float formatting; the human table rounds for display. The `--benchmark-json` path is separate from spectral `--format json` output.
 
 ### What is being timed
 
@@ -630,7 +644,9 @@ The whole-file table reports two times:
 - `Setup`
   planner creation, config creation, allocation, or equivalent transform preparation
 - `Exec`
-  one measured transform call, excluding WAV load time and excluding repeat-to-repeat input restoration performed by the benchmark harness
+  arithmetic mean of individually timed transform calls, excluding WAV load time and excluding repeat-to-repeat input restoration performed by the benchmark harness
+
+Algorithms run in fixed order, without a separate whole-file warm-up. Setup is measured once per algorithm per process; the native plan cache can affect setup measurements within a process. The runner's median is across independent process trials, not a confidence interval. Pinning CPU affinity, controlling thermal and power state, and minimizing background work improve repeatability but are not enforced by the runner. Optional foreign-library builds should be reported separately from the default build.
 
 That distinction is important. A planner-heavy library can look slower in one-shot runs even if it is excellent when a plan is reused many times. Conversely, a lightweight library can look great in a single transform but lose ground when the workload changes shape or dimensionality.
 
