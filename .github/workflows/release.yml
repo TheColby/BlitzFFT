@@ -44,10 +44,10 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-24.04
-            target: x86_64
+            target: x86_64-unknown-linux-gnu
             manylinux: '2014'
           - runner: ubuntu-24.04-arm
-            target: aarch64
+            target: aarch64-unknown-linux-gnu
             manylinux: '2014'
           - runner: macos-15-intel
             target: x86_64-apple-darwin
@@ -113,7 +113,7 @@ jobs:
       - name: Install maturin
         run: python3 -m pip install 'maturin>=1.8,<2'
       - name: Build source distribution
-        run: maturin sdist --locked --out dist
+        run: maturin sdist --out dist
       - name: Smoke test source distribution
         run: |
           python3 -m venv /tmp/blitzfft-sdist-venv
